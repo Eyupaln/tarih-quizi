@@ -13,6 +13,15 @@
     <script src="app.js" defer></script>
   </head>
   <body>
+    <div class="loading-screen" id="loadingScreen" role="status" aria-live="polite" aria-busy="true" aria-label="Yükleniyor">
+      <div class="loading-screen__content">
+        <div class="loading-screen__ball" aria-hidden="true">
+          <img src="assets/clker-free-vector-images-soccer-ball-310065.svg" alt="" draggable="false" />
+        </div>
+        <span class="loading-screen__label">YÜKLENİYOR</span>
+      </div>
+    </div>
+
     <div class="app-background" aria-hidden="true">
       <div class="background-orb background-orb--green"></div>
       <div class="background-orb background-orb--orange"></div>
@@ -59,7 +68,7 @@
           <div class="lobby-actions">
             <button class="action-button action-button--primary" id="createRoomButton" type="button">
               <span class="action-button-icon material-symbols-rounded">add</span>
-              <span><strong>Oda oluştur</strong><small> rakibini çağır</small></span>
+              <span><strong>ODA OLUŞTUR</strong><small> rakibini çağır</small></span>
               <span class="button-arrow material-symbols-rounded">arrow_forward</span>
             </button>
             <button class="action-button action-button--secondary" id="joinRoomButton" type="button">
@@ -125,31 +134,45 @@
             <span class="match-room-label" id="matchRoomLabel">ODA · ABCD</span>
           </div>
 
-          <div class="match-scoreboard">
+          <div class="match-scoreboard" id="matchScoreboard" aria-label="Maç skoru">
             <div class="score-player score-player--you">
-              <div class="score-avatar material-symbols-rounded" id="youAvatar">sports_soccer</div>
-              <div><strong id="youName">SEN</strong><small>FORVET / KALECİ</small></div>
+              <span class="score-player__name" id="youName">SEN</span>
+              <strong class="score-player__score" id="youScore">0</strong>
+              <span class="score-visually-hidden" id="youAvatar" aria-hidden="true"></span>
+              <small class="score-visually-hidden" id="youRoleLabel">FORVET / KALECİ</small>
             </div>
-            <div class="score-center"><strong id="scoreText">0 – 0</strong><span id="scoreStatus">MAÇ BAŞLIYOR</span></div>
+            <div class="score-center">
+              <img class="score-center__ball" src="assets/orta top.svg" alt="" aria-hidden="true" draggable="false" />
+              <span class="score-feedback" id="scoreFeedback" role="status" aria-live="polite"></span>
+              <span class="score-visually-hidden" id="scoreStatus">MAÇ BAŞLIYOR</span>
+              <span class="score-visually-hidden" id="scoreText">0 – 0</span>
+            </div>
             <div class="score-player score-player--opponent">
-              <div class="score-avatar material-symbols-rounded" id="opponentAvatar">sports_handball</div>
-              <div><strong id="opponentName">RAKİP</strong><small id="opponentRoleLabel">RAKİP</small></div>
+              <strong class="score-player__score" id="opponentScore">0</strong>
+              <span class="score-player__name" id="opponentName">RAKİP</span>
+              <span class="score-visually-hidden" id="opponentAvatar" aria-hidden="true"></span>
+              <small class="score-visually-hidden" id="opponentRoleLabel">RAKİP</small>
             </div>
           </div>
 
-          <div class="round-strip">
-            <div class="round-copy"><span class="eyebrow" id="roundEyebrow">VURUŞ</span><strong id="roundLabel">1 / 5</strong></div>
+
+          <div class="round-strip" aria-label="Penaltı durumu ve geçmişi">
+            <div class="round-copy">
+              <span class="eyebrow" id="roundEyebrow">VURUŞ</span>
+              <div class="round-count" aria-hidden="true">
+                <strong id="roundCurrent">1</strong>
+                <span id="roundTotal">/ 5</span>
+              </div>
+              <span class="score-visually-hidden" id="roundLabel">1 / 5</span>
+            </div>
             <div class="round-dots-wrap">
-              <div class="round-dots-label"><span>SEN</span><span>RAKİP</span></div>
-              <div class="round-dots" id="youAttemptDots"></div>
-              <div class="round-dots" id="opponentAttemptDots"></div>
+              <div class="round-dots-label">
+                <span>SEN <b id="youAttemptCount">0/5</b></span>
+                <span>RAKİP <b id="opponentAttemptCount">0/5</b></span>
+              </div>
+              <div class="round-dots" id="youAttemptDots" role="list" aria-label="Senin penaltı geçmişin"></div>
+              <div class="round-dots" id="opponentAttemptDots" role="list" aria-label="Rakip penaltı geçmişi"></div>
             </div>
-          </div>
-
-          <div class="role-banner" id="roleBanner">
-            <div class="role-banner-icon material-symbols-rounded" id="roleBannerIcon">sports_soccer</div>
-            <div><span class="eyebrow">SIRA SENDE</span><strong id="roleTitle">FORVET</strong></div>
-            <div class="role-timer" id="roleTimer">00:00</div>
           </div>
 
           <div class="pitch" id="pitch" aria-label="Penaltı sahnesi">

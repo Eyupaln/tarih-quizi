@@ -6,6 +6,7 @@
   const materialIcon = (name, className = "") => `<span class="material-symbols-rounded ${className}" aria-hidden="true">${name}</span>`;
 
   const els = {
+    loadingScreen: $("#loadingScreen"),
     appShell: $("#appShell"),
     lobbyView: $("#lobbyView"),
     matchView: $("#matchView"),
@@ -32,15 +33,23 @@
     leaveMatchButton: $("#leaveMatchButton"),
     youAvatar: $("#youAvatar"),
     youName: $("#youName"),
+    youScore: $("#youScore"),
     opponentAvatar: $("#opponentAvatar"),
     opponentName: $("#opponentName"),
+    opponentScore: $("#opponentScore"),
     opponentRoleLabel: $("#opponentRoleLabel"),
+    matchScoreboard: $("#matchScoreboard"),
     scoreText: $("#scoreText"),
     scoreStatus: $("#scoreStatus"),
+    scoreFeedback: $("#scoreFeedback"),
     roundEyebrow: $("#roundEyebrow"),
+    roundCurrent: $("#roundCurrent"),
+    roundTotal: $("#roundTotal"),
     roundLabel: $("#roundLabel"),
     youAttemptDots: $("#youAttemptDots"),
     opponentAttemptDots: $("#opponentAttemptDots"),
+    youAttemptCount: $("#youAttemptCount"),
+    opponentAttemptCount: $("#opponentAttemptCount"),
     roleBanner: $("#roleBanner"),
     roleBannerIcon: $("#roleBannerIcon"),
     roleTitle: $("#roleTitle"),
@@ -100,6 +109,32 @@
     closeRulesButton: $("#closeRulesButton"),
   };
 
+  const loadingVisitKey = "penalti-duello-loading-seen";
+  let hasVisitedSite = false;
+
+  try {
+    hasVisitedSite = sessionStorage.getItem(loadingVisitKey) === "true";
+    sessionStorage.setItem(loadingVisitKey, "true");
+  } catch {
+    // Keep the first-load timing if session storage is unavailable.
+  }
+
+  document.body.classList.add("is-loading");
+  const isReload = window.performance?.getEntriesByType?.("navigation")?.[0]?.type === "reload";
+  const loadingDuration = hasVisitedSite || isReload ? 1100 : 1200;
+
+  if (els.loadingScreen) {
+    els.loadingScreen.dataset.duration = String(loadingDuration);
+    window.setTimeout(() => {
+      els.loadingScreen.classList.add("is-hidden");
+      els.loadingScreen.setAttribute("aria-busy", "false");
+      els.loadingScreen.setAttribute("aria-hidden", "true");
+      document.body.classList.remove("is-loading");
+    }, loadingDuration);
+  } else {
+    document.body.classList.remove("is-loading");
+  }
+
   const BOT_POOL = {
     duo: [
       { id: "opponent", name: "MERT", avatar: "sports_handball" },
@@ -127,6 +162,7 @@
   let roundTimer = null;
   let countdownTimers = [];
   let resolveTimer = null;
+  let scoreFeedbackTimer = null;
   let audioContext = null;
 
   const playerYou = () => ({ id: "you", name: "SEN", avatar: "sports_soccer", ready: false, bot: false });
@@ -163,10 +199,18 @@
   function clearMatchTimers() {
     if (roundTimer) window.clearInterval(roundTimer);
     if (resolveTimer) window.clearTimeout(resolveTimer);
+    if (scoreFeedbackTimer) window.clearTimeout(scoreFeedbackTimer);
     countdownTimers.forEach((timer) => window.clearTimeout(timer));
     roundTimer = null;
     resolveTimer = null;
+    scoreFeedbackTimer = null;
     countdownTimers = [];
+    if (els.scoreFeedback) {
+      els.scoreFeedback.classList.remove("is-visible", "score-feedback--goal", "score-feedback--save", "score-feedback--miss", "score-feedback--conceded");
+      els.scoreFeedback.textContent = "";
+    }
+    [els.youScore, els.opponentScore].forEach((score) => score?.classList.remove("score-pop"));
+    if (els.matchScoreboard) els.matchScoreboard.classList.remove("is-goal", "is-save", "is-miss", "is-conceded");
   }
 
   function hideOverlays() {
@@ -389,6 +433,9 @@
       tournamentRecorded: false,
       lastResult: null,
     };
+    els.youScore.textContent = "0";
+    els.opponentScore.textContent = "0";
+    els.scoreText.textContent = "0 – 0";
     els.matchRoomLabel.textContent = `ODA · ${state.roomCode || "DEMO"}`;
     setView("match");
     beginRound();
@@ -419,13 +466,46 @@
   function updateRoundTimer() {
     const match = state.match;
     if (!match || match.phase === "result" || match.phase === "resolving" || match.phase === "finished") {
-      els.roleTimer.textContent = "—";
+      if (els.roleTimer) els.roleTimer.textContent = "—";
       return;
     }
     const elapsed = Math.floor((Date.now() - match.startedAt) / 1000);
     const remaining = Math.max(0, 10 - elapsed);
-    els.roleTimer.textContent = `00:${String(remaining).padStart(2, "0")}`;
-    if (remaining === 0) els.roleTimer.classList.add("is-time-warning");
+    if (els.roleTimer) els.roleTimer.textContent = `00:${String(remaining).padStart(2, "0")}`;
+    if (remaining === 0) els.roleTimer?.classList.add("is-time-warning");
+  }
+
+  function pulseScore(element) {
+    if (!element) return;
+    element.classList.remove("score-pop");
+    void element.offsetWidth;
+    element.classList.add("score-pop");
+  }
+
+  function showScoreFeedback(result) {
+    if (!els.scoreFeedback) return;
+    const userScored = result === "goal" && userIsStriker();
+    const userConceded = result === "goal" && !userIsStriker();
+    const userSaved = result === "save" && !userIsStriker();
+    const tone = result === "goal" ? (userConceded ? "conceded" : "goal") : result;
+    const labels = {
+      goal: userScored ? "GOL!" : "GOL YEDİN+!",
+      save: userSaved ? "KURTARDIN!" : "KURTARDI!",
+      miss: "KAÇIRDI!",
+    };
+    window.clearTimeout(scoreFeedbackTimer);
+    els.scoreFeedback.textContent = labels[result] || "";
+    els.scoreFeedback.classList.remove("is-visible", "score-feedback--goal", "score-feedback--save", "score-feedback--miss", "score-feedback--conceded");
+    els.scoreFeedback.classList.add("is-visible", `score-feedback--${tone}`);
+    if (els.matchScoreboard) {
+      els.matchScoreboard.classList.remove("is-goal", "is-save", "is-miss", "is-conceded");
+      els.matchScoreboard.classList.add(`is-${tone}`);
+    }
+    scoreFeedbackTimer = window.setTimeout(() => {
+      els.scoreFeedback.classList.remove("is-visible");
+      if (els.matchScoreboard) els.matchScoreboard.classList.remove("is-goal", "is-save", "is-miss", "is-conceded");
+      scoreFeedbackTimer = null;
+    }, 950);
   }
 
   function renderMatch() {
@@ -434,21 +514,32 @@
     const [you, opponent] = match.players;
     const striker = userIsStriker();
     const regularRound = Math.min(5, ((match.round - 1) % 5) + 1);
-    const attemptText = match.suddenDeath ? `ALTIN ${Math.floor((match.round - 10 + 1) / 2)}` : `${regularRound} / 5`;
+    const currentAttempt = match.suddenDeath ? Math.floor((match.round - 10 + 1) / 2) : regularRound;
+    const totalLabel = match.suddenDeath ? "ALTIN" : "/ 5";
+    const attemptText = match.suddenDeath ? `ALTIN ${currentAttempt}` : `${currentAttempt} / 5`;
+    const previousYouScore = els.youScore.textContent.trim();
+    const previousOpponentScore = els.opponentScore.textContent.trim();
 
     els.youAvatar.innerHTML = materialIcon(you.avatar);
     els.youName.textContent = you.name;
     els.opponentAvatar.innerHTML = materialIcon(opponent.avatar);
     els.opponentName.textContent = opponent.name;
+    els.youScore.textContent = String(match.score[0]);
+    els.opponentScore.textContent = String(match.score[1]);
+    if (previousYouScore && previousYouScore !== els.youScore.textContent) pulseScore(els.youScore);
+    if (previousOpponentScore && previousOpponentScore !== els.opponentScore.textContent) pulseScore(els.opponentScore);
     els.scoreText.textContent = `${match.score[0]} – ${match.score[1]}`;
     els.scoreStatus.textContent = match.suddenDeath ? "ALTIN PENALTI" : "MAÇ";
     els.roundEyebrow.textContent = match.suddenDeath ? "ALTIN VURUŞ" : "VURUŞ";
+    els.roundCurrent.textContent = String(currentAttempt);
+    els.roundTotal.textContent = totalLabel;
     els.roundLabel.textContent = attemptText;
-    els.roleBanner.classList.toggle("role-banner--keeper", !striker);
-    els.roleBannerIcon.innerHTML = materialIcon(striker ? "sports_soccer" : "sports_handball");
-    els.roleTitle.textContent = striker ? "FORVET" : "KALECİ";
+    if (els.roleBanner) els.roleBanner.classList.toggle("role-banner--keeper", !striker);
+    if (els.roleBannerIcon) els.roleBannerIcon.innerHTML = materialIcon(striker ? "sports_soccer" : "sports_handball");
+    if (els.roleTitle) els.roleTitle.textContent = striker ? "FORVET" : "KALECİ";
     els.pitch.classList.toggle("pitch--keeper", !striker);
-    els.tapLabel.textContent = "VUR";
+    els.tapLabel.textContent = striker ? "VUR" : "KURTAR";
+    els.ballHandle.setAttribute("aria-label", striker ? "Vuruş topu" : "Kurtarış topu");
     const hasAim = Boolean(match.userAim);
     els.pitchBadge.classList.toggle("is-miss", Boolean(hasAim && match.userAim.type === "miss"));
     els.pitchBadge.textContent = hasAim
@@ -506,17 +597,22 @@
   }
 
   function renderDots(container, attempts, isCurrentSide) {
-    const current = state.match;
-    const total = current.suddenDeath ? 5 : 5;
+    const total = 5;
     const visibleAttempts = attempts.slice(-total);
+    const resultLabels = { goal: "Gol", save: "Kurtarış", miss: "Kaçırma" };
+    const usedCount = attempts.length > total ? `${total}+` : `${attempts.length}/${total}`;
+    if (isCurrentSide && els.youAttemptCount) els.youAttemptCount.textContent = usedCount;
+    if (!isCurrentSide && els.opponentAttemptCount) els.opponentAttemptCount.textContent = usedCount;
     let html = "";
     for (let index = 0; index < total; index += 1) {
       const result = visibleAttempts[index];
-      const className = result ? `round-dot--${result}` : "";
-      html += `<span class="round-dot ${className}"></span>`;
+      const isCurrent = !result && index === attempts.length;
+      const className = `${result ? `round-dot--${result}` : ""}${isCurrent ? " round-dot--current" : ""}`;
+      const label = result ? `${index + 1}. ${resultLabels[result] || "Sonuç"}` : `${index + 1}. Kullanılmadı`;
+      html += `<span class="round-dot ${className}" role="listitem" aria-label="${label}" title="${label}"></span>`;
     }
     container.innerHTML = html;
-    container.setAttribute("aria-label", `${isCurrentSide ? "Sen" : "Rakip"} ${attempts.length} vuruş`);
+    container.setAttribute("aria-label", `${isCurrentSide ? "Sen" : "Rakip"} ${attempts.length} penaltı kullanıldı`);
   }
 
   function updatePowerMeter(aim, striker = true) {
@@ -696,6 +792,7 @@
       if (result === "save") match.saves[goalkeeperIndex] += 1;
       match.phase = "result";
       renderMatch();
+      showScoreFeedback(result);
       showShotResult(result, strikerIndex, goalkeeperIndex);
     }, 620);
   }
@@ -726,6 +823,8 @@
     const row = Math.floor(Number(aim.cell) / 3);
     if (column === 0 && row === 0) els.keeper.classList.add("keeper--dive-high-left");
     else if (column === 2 && row === 0) els.keeper.classList.add("keeper--dive-high-right");
+    else if (column === 0 && row === 2) els.keeper.classList.add("keeper--dive-low-left");
+    else if (column === 2 && row === 2) els.keeper.classList.add("keeper--dive-low-right");
     else if (column === 0) els.keeper.classList.add("keeper--dive-left");
     else if (column === 2) els.keeper.classList.add("keeper--dive-right");
     else if (row === 0) els.keeper.classList.add("keeper--dive-high");
@@ -743,7 +842,7 @@
       message = userStriker ? "Rakip şutu kurtardı." : "Harika refleks! Kaleyi savundun.";
       icon = "sports_handball";
     } else if (result === "goal" && !userStriker) {
-      title = "GOL YEDİ!";
+      title = "GOL YEDİM!";
       message = "Rakip golü ağlara götürdü.";
       icon = "sports_soccer";
     } else if (result === "miss") {
@@ -766,7 +865,7 @@
       "match-finish": "SONUÇLARI GÖR",
     };
     state.resultAction = action;
-    els.resultCard.className = `result-card result-card--${result}`;
+    els.resultCard.className = `result-card result-card--${result}${result === "goal" && !userStriker ? " result-card--conceded" : ""}`;
     els.resultIcon.innerHTML = materialIcon(icon);
     els.resultEyebrow.textContent = match.suddenDeath ? "ALTIN PENALTI" : "VURUŞ SONU";
     els.resultTitle.textContent = title;
