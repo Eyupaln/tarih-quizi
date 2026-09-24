@@ -6,6 +6,7 @@
   const materialIcon = (name, className = "") => `<span class="material-symbols-rounded ${className}" aria-hidden="true">${name}</span>`;
 
   const els = {
+    appShell: $("#appShell"),
     lobbyView: $("#lobbyView"),
     matchView: $("#matchView"),
     tournamentView: $("#tournamentView"),
@@ -155,6 +156,7 @@
   function setView(name) {
     const views = { lobby: els.lobbyView, match: els.matchView, tournament: els.tournamentView };
     Object.entries(views).forEach(([key, view]) => view.classList.toggle("view--active", key === name));
+    els.appShell.classList.toggle("is-lobby", name === "lobby");
     window.scrollTo({ top: 0, behavior: "instant" });
   }
 
