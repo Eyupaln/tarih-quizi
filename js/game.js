@@ -919,9 +919,9 @@
     setKeeperAnimation(keeperAim);
     playSound("kick", 0.9);
     if (result === "goal") {
-      playSound("cheer", 0.9);
       playSound("goalNet", 0.9);
-      if (!userIsStriker()) playSound("conceded", 0.88);
+      if (userIsStriker()) playSound("cheer", 0.9);
+      else playSound("conceded", 0.88);
     }
     if (result === "save") {
       const saveSound = userIsStriker() ? "save" : "userSave";
