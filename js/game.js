@@ -70,6 +70,7 @@
     opponentStatusText: $("#opponentStatusText"),
     statusPulse: $("#statusPulse"),
     opponentActionButton: $("#opponentActionButton"),
+    opponentPanel: $("#opponentActionPanel"),
     opponentTargetGrid: $("#opponentTargetGrid"),
     opponentTargetLabel: $("#opponentTargetLabel"),
     instructionIcon: $("#instructionIcon"),
@@ -160,6 +161,7 @@
     tournament: null,
     resultAction: null,
     sound: window.PenaltiShared?.getSoundEnabled?.() ?? true,
+    realtime: false,
   };
 
   let toastTimer = null;
@@ -470,7 +472,311 @@
     }
   }
 
+  let realtimeBound = false;
+  let realtimeMatchActive = false;
+  let realtimeFinishedShown = false;
+
+  function normalizeRealtimeResult(result) {
+    if (result === "GOL") return "goal";
+    if (result === "KURTARDI") return "save";
+    if (result === "KACIRDI" || result === "MISS") return "miss";
+    return "goal";
+  }
+
+  function buildRealtimeMatchState(room, payload = {}) {
+    const rawPlayers = payload.players?.length ? payload.players : room?.players || [];
+    const playerToken = window.PenaltiShared?.getPlayerToken?.() || "you";
+    const youIndex = Math.max(0, rawPlayers.findIndex((player) => player.id === playerToken));
+    const orderedPlayers = rawPlayers.length ? rawPlayers : [
+      { id: playerToken, nickname: "SEN" },
+      { id: "opponent", nickname: "RAKİP" },
+    ];
+    const youRaw = orderedPlayers[youIndex] || orderedPlayers[0];
+    const opponentRaw = orderedPlayers[youIndex === 0 ? 1 : 0] || { id: "opponent", nickname: "RAKİP" };
+    const toLocalPlayer = (player, isYou) => ({
+      ...player,
+      name: player.nickname || (isYou ? "SEN" : "RAKİP"),
+      nickname: player.nickname || (isYou ? "SEN" : "RAKİP"),
+      avatar: isYou ? "sports_soccer" : "person",
+      bot: false,
+    });
+    const you = toLocalPlayer(youRaw, true);
+    const opponent = toLocalPlayer(opponentRaw, false);
+    const round = Number(payload.round ?? room?.match?.round) || 1;
+    const forvetId = payload.forvetId || orderedPlayers[round % 2 === 1 ? 0 : 1]?.id;
+    const kaleciId = payload.kaleciId || orderedPlayers[round % 2 === 1 ? 1 : 0]?.id;
+    const sourceScore = room?.match?.score || {};
+    const score = [Number(sourceScore.player1) || 0, Number(sourceScore.player2) || 0];
+    if (youIndex === 1) score.reverse();
+    const attempts = [[], []];
+    const saves = [0, 0];
+    const shots = room?.match?.shots || { forvet: [], kaleci: [] };
+    shots.forvet.forEach((shot) => {
+      const serverForvetIndex = shot.round % 2 === 1 ? 0 : 1;
+      const localForvetIndex = serverForvetIndex === youIndex ? 0 : 1;
+      const result = normalizeRealtimeResult(shot.result);
+      attempts[localForvetIndex].push(result);
+      attempts[localForvetIndex === 0 ? 1 : 0].push(result);
+      if (result === "save") saves[localForvetIndex === 0 ? 1 : 0] += 1;
+    });
+
+    return {
+      players: [you, opponent],
+      score,
+      attempts,
+      saves,
+      round,
+      suddenDeath: Boolean(payload.goldenPenalty ?? room?.match?.goldenPenalty),
+      youRole: forvetId === you.id ? "forvet" : "kaleci",
+      opponentRole: kaleciId === opponent.id ? "kaleci" : "forvet",
+    };
+  }
+
+  function applyRealtimeRoom(room) {
+    if (!room) return;
+    state.room = true;
+    state.roomCode = room.code || state.roomCode;
+    state.players = room.players || [];
+    window.PenaltiShared?.setRoomSnapshot?.(room, room.code);
+  }
+
+  function bindRealtimeEvents() {
+    if (realtimeBound) return;
+    realtimeBound = true;
+    const shared = window.PenaltiShared;
+    shared.onSocket("match:started", (payload) => {
+      if (state.realtime && !realtimeMatchActive) startRealtimeMatch(payload);
+    });
+    shared.onSocket("round:result", (payload) => {
+      if (state.realtime) handleRealtimeRoundResult(payload);
+    });
+    shared.onSocket("shot:waiting", (payload) => {
+      if (!state.match || !state.realtime) return;
+      if (payload?.role === state.match.youRole) state.match.userConfirmed = true;
+      else state.match.botConfirmed = true;
+      renderMatch();
+    });
+    shared.onSocket("round:ready", (payload) => {
+      if (state.realtime) handleRealtimeRoundReady(payload);
+    });
+    shared.onSocket("match:finished", (payload) => {
+      if (!state.realtime) return;
+      state.realtimeFinished = payload;
+      if (!state.match || state.match.phase === "aim" || state.match.phase === "waiting-next") {
+        showRealtimeFinished(payload);
+      }
+    });
+    shared.onSocket("opponent:disconnected", (payload) => {
+      if (payload?.message) {
+        if (state.match) {
+          state.match.phase = "waiting-opponent";
+          els.opponentStatusText.textContent = payload.message;
+        }
+        showToast(payload.message, "orange");
+      }
+    });
+    shared.onSocket("room:playerReconnected", (payload) => {
+      if (!state.realtime) return;
+      if (payload?.room) applyRealtimeRoom(payload.room);
+      if (state.match?.phase === "waiting-opponent") {
+        state.match.phase = "aim";
+        els.opponentStatusText.textContent = "Rakip yeniden bağlandı.";
+        renderMatch();
+      }
+    });
+    shared.onSocket("room:playerLeft", (payload) => {
+      if (payload?.message) {
+        if (state.match) els.opponentStatusText.textContent = payload.message;
+        showToast(payload.message, "orange");
+      }
+    });
+    shared.onSocket("room:error", (payload) => {
+      if (payload?.message) showToast(payload.message, "orange");
+    });
+    shared.onSocket("connect_error", () => showToast("Sunucuya bağlanılamadı.", "orange"));
+  }
+
+  function startRealtimeMatch(payload = {}) {
+    if (realtimeMatchActive) return;
+    const room = payload.room;
+    if (!room) return;
+    realtimeMatchActive = true;
+    realtimeFinishedShown = false;
+    state.realtime = true;
+    state.mode = "duo";
+    applyRealtimeRoom(room);
+    clearMatchTimers();
+    hideOverlays();
+    const nextState = buildRealtimeMatchState(room, payload);
+    state.match = {
+      ...nextState,
+      phase: "aim",
+      userAim: null,
+      botAim: null,
+      userConfirmed: false,
+      botConfirmed: false,
+      startedAt: Date.now(),
+      tournamentIndex: null,
+      tournamentRecorded: false,
+      lastResult: null,
+    };
+    state.realtimeFinished = null;
+    els.matchRoomLabel.textContent = `ODA · ${room.code || "----"}`;
+    if (els.opponentPanel) els.opponentPanel.hidden = true;
+    setView("match");
+    window.PenaltiShared?.stopMenuMusic?.();
+    startCrowdAmbience();
+    beginRound();
+  }
+
+  function updateRealtimeRound(payload = {}) {
+    const room = payload.room;
+    if (!room || !state.match) return;
+    applyRealtimeRoom(room);
+    const nextState = buildRealtimeMatchState(room, payload);
+    state.match.players = nextState.players;
+    state.match.score = nextState.score;
+    state.match.attempts = nextState.attempts;
+    state.match.saves = nextState.saves;
+    state.match.round = nextState.round;
+    state.match.suddenDeath = nextState.suddenDeath;
+    state.match.youRole = nextState.youRole;
+    state.match.opponentRole = nextState.opponentRole;
+  }
+
+  function handleRealtimeRoundReady(payload) {
+    if (!state.match) return;
+    updateRealtimeRound(payload);
+    state.match.phase = "aim";
+    beginRound();
+  }
+
+  function handleRealtimeRoundResult(payload) {
+    const match = state.match;
+    if (!match || match.phase === "resolving" || match.phase === "result") return;
+    updateRealtimeRound(payload);
+    match.suddenDeath = Boolean(payload.goldenPenalty && payload.round > 10);
+    const forvetZone = Number(payload.forvetZone);
+    const kaleciZone = Number(payload.kaleciZone);
+    if (!Number.isInteger(forvetZone) || !Number.isInteger(kaleciZone)) return;
+    const forvetIsYou = match.youRole === "forvet";
+    match.userAim = { type: "goal", cell: forvetIsYou ? forvetZone : kaleciZone };
+    match.botAim = { type: "goal", cell: forvetIsYou ? kaleciZone : forvetZone };
+    match.phase = "resolving";
+    const result = normalizeRealtimeResult(payload.result);
+    const shot = { type: "goal", cell: forvetZone };
+    const keeperAim = { type: "goal", cell: kaleciZone };
+    els.opponentStatusText.textContent = "Vuruş sonucu açıklanıyor…";
+    playSound("whistle", 0.8);
+    resolveTimer = window.setTimeout(() => {
+      if (state.match !== match) return;
+      animateShot(shot, keeperAim, result);
+      resolveTimer = window.setTimeout(() => {
+        if (state.match !== match) return;
+        match.phase = "result";
+        const strikerIndex = forvetIsYou ? 0 : 1;
+        renderMatch();
+        showScoreFeedback(result);
+        showShotResult(result, strikerIndex, strikerIndex === 0 ? 1 : 0);
+        if (payload.matchOver && !state.realtimeFinished) state.realtimeFinished = payload;
+        if (payload.goldenPenalty && payload.nextRound === 11) state.resultAction = "start-sudden";
+        else if (payload.matchOver) state.resultAction = "match-finish";
+        else state.resultAction = "next-round";
+        els.resultPrimaryButton.innerHTML = `${payload.matchOver ? "SONUÇLARI GÖR" : payload.goldenPenalty && payload.nextRound === 11 ? "ALTIN PENALTI" : "SONRAKİ VURUŞ"} ${materialIcon("arrow_forward")}`;
+      }, 620);
+    }, 320);
+  }
+
+  function showRealtimeFinished(payload = {}) {
+    if (!state.match || realtimeFinishedShown) return;
+    realtimeFinishedShown = true;
+    const match = state.match;
+    clearMatchTimers();
+    stopCrowdAmbience();
+    updateRealtimeRound(payload);
+    match.phase = "finished";
+    hideOverlays();
+    const userToken = window.PenaltiShared?.getPlayerToken?.();
+    const userWon = payload.winnerId ? payload.winnerId === userToken : match.score[0] > match.score[1];
+    const tied = match.score[0] === match.score[1];
+    const disconnected = payload.reason === "opponent_disconnected";
+    state.resultAction = "realtime-finish";
+    els.resultCard.className = "result-card";
+    els.resultIcon.innerHTML = materialIcon(disconnected ? "person_off" : userWon ? "emoji_events" : tied ? "handshake" : "sports_soccer");
+    els.resultEyebrow.textContent = disconnected ? "RAKİP AYRILDI" : "MAÇ SONU";
+    els.resultTitle.textContent = disconnected ? "MAÇ SONLANDI" : userWon ? "KAZANDIN!" : tied ? "DÜELLO BERABERE!" : "KAYBETTİN";
+    els.resultMessage.textContent = disconnected ? "Rakibin bağlantısı koptu." : userWon ? "Rakibini yendin." : "Bu maç için tekrar dene.";
+    els.resultScore.textContent = `SEN ${match.score[0]} – ${match.score[1]} RAKİP`;
+    els.resultStats.innerHTML = resultStatsMarkup(match);
+    els.resultPrimaryButton.innerHTML = `LOBİYE DÖN ${materialIcon("arrow_forward")}`;
+    els.resultSecondaryButton.textContent = "ANA MENÜ";
+    renderConfetti(userWon);
+    els.resultOverlay.hidden = false;
+  }
+
+  function handleRealtimeResultPrimary() {
+    if (state.resultAction === "realtime-finish" || state.realtimeFinished || state.resultAction === "match-finish") {
+      if (state.realtimeFinished) showRealtimeFinished(state.realtimeFinished);
+      else exitToLobby();
+      return;
+    }
+    if (!["next-round", "start-sudden", "next-sudden"].includes(state.resultAction)) return;
+    els.resultOverlay.hidden = true;
+    if (state.match) state.match.phase = "waiting-next";
+    els.opponentStatusText.textContent = "Yeni tur bekleniyor…";
+    window.PenaltiShared.emitWithAck("match:next").catch((error) => {
+      if (error?.message) showToast(error.message, "orange");
+    });
+  }
+
+  async function confirmRealtimeUserAction() {
+    const match = state.match;
+    if (!match || match.phase !== "aim" || match.userConfirmed) return;
+    const zone = Number(match.userAim?.cell);
+    if (!Number.isInteger(zone) || zone < 0 || zone > 8) {
+      showToast("Önce hedef bölge seç.", "orange");
+      return;
+    }
+    match.userConfirmed = true;
+    renderMatch();
+    const eventName = match.youRole === "forvet" ? "shot:submit" : "save:submit";
+    try {
+      const response = await window.PenaltiShared.emitWithAck(eventName, { zone });
+      if (!response?.ok) throw new Error(response?.error?.message || "Seçimin gönderilemedi.");
+    } catch (error) {
+      match.userConfirmed = false;
+      renderMatch();
+      showToast(error.message || "Seçimin gönderilemedi.", "orange");
+    }
+  }
+
+  async function launchRealtime(roomCode) {
+    state.realtime = true;
+    state.mode = "duo";
+    state.room = true;
+    state.roomCode = roomCode;
+    bindRealtimeEvents();
+    const shared = window.PenaltiShared;
+    try {
+      const response = await shared.emitWithAck("room:rejoin", {
+        code: roomCode,
+        nickname: shared.getPlayerName(),
+        playerToken: shared.getPlayerToken(),
+      });
+      if (!response?.ok) throw new Error(response?.error?.message || "Oda bulunamadı.");
+      if (response.started || response.room?.status === "in_progress") startRealtimeMatch(response);
+      else window.location.replace("lobby.html");
+    } catch (error) {
+      showToast(error.message || "Odaya yeniden bağlanılamadı.", "orange");
+      window.setTimeout(() => window.location.replace("lobby.html"), 1200);
+    }
+  }
+
   function launchFromRoom(roomCode, mode = "duo") {
+    if (window.PenaltiShared?.socket) {
+      launchRealtime(roomCode);
+      return;
+    }
     setMode(mode === "tournament" ? "tournament" : "duo");
     setupDemoRoom(roomCode);
     const you = state.players.find((player) => player.id === "you");
@@ -550,6 +856,7 @@
   }
 
   function userIsStriker() {
+    if (state.match?.youRole) return state.match.youRole === "forvet";
     return Boolean(state.match && state.match.round % 2 === 1);
   }
 
@@ -835,6 +1142,10 @@
   }
 
   function confirmUserAction() {
+    if (state.realtime) {
+      confirmRealtimeUserAction();
+      return;
+    }
     const match = state.match;
     if (!match || match.phase !== "aim" || match.userConfirmed) return;
     if (!match.userAim) {
@@ -1019,6 +1330,10 @@
   }
 
   function handleResultPrimary() {
+    if (state.realtime) {
+      handleRealtimeResultPrimary();
+      return;
+    }
     const match = state.match;
     if (!match) return;
     const action = state.resultAction;
@@ -1083,6 +1398,7 @@
   function exitToLobby() {
     stopCrowdAmbience();
     if (document.body.dataset.page === "game") {
+      if (state.realtime) window.PenaltiShared?.leaveRoom?.();
       window.location.href = "lobby.html";
       return;
     }
@@ -1384,6 +1700,7 @@
   els.brandHome.addEventListener("click", (event) => {
     event.preventDefault();
     stopCrowdAmbience();
+    if (state.realtime) window.PenaltiShared?.leaveRoom?.();
     window.location.href = "index.html";
   });
   els.soundToggle.addEventListener("click", () => {

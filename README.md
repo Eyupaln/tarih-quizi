@@ -46,29 +46,59 @@ Railway veya benzeri Node.js barındırma servislerinde `PORT` ortam değişkeni
 - `create-room.html`: oda kodu oluşturma
 - `join-room.html`: oda kodu ile katılma
 - `lobby.html`: oyuncu listesi, hazır durumu ve maç başlatma
-- `game.html`: mevcut maç ekranı ve oyun motoru
-- `js/shared.js`: nickname doğrulama, session state, loading ve ortak yardımcılar
+- `game.html`: maç ekranı ve oyun motoru
+- `server.js`: Express statik sunucu + Socket.io eşzamanlı maç sunucusu
+- `js/shared.js`: nickname doğrulama, socket bağlantısı, session state, ses ve ortak yardımcılar
 - Sayfaya özel JS dosyaları: `js/main.js`, `js/create-room.js`, `js/join-room.js`, `js/lobby.js`, `js/game-page.js`
-- Mevcut maç motoru `js/game.js` içinde korunuyor.
+- Maç motoru ve gerçek zamanlı senkronizasyon `js/game.js` içinde.
 
-Oyuncu adı, oda kodu ve oda durumu `sessionStorage` üzerinden sayfalar arasında aktarılır. Backend/socket bağlantısı eklenene kadar akış mevcut bot/demo oyuncu mantığıyla çalışır.
+Oyuncu adı ve oyuncu token'ı `sessionStorage` üzerinde tutulur. Oda durumu, hazır durumu, roller, vuruş/kurtarış seçimleri, skor ve maç sonucu artık **sunucu tarafında** yönetilir; istemciler yalnızca Socket.io event'leriyle güncellenir.
+
+## Backend mimarisi
+
+- `server.js` statik dosyaları `express.static` ile sunar ve aynı HTTP sunucusuna Socket.io'yu bağlar.
+- Port `process.env.PORT || 3000` üzerinden okunur (Railway otomatik olarak enjekte eder).
+- Oda verisi sunucu belleğinde bir `Map` içinde tutulur; oda boşaldığında silinir.
+- Oda kodları `nanoid` ile 6 karakter üretilir ve çakışma kontrolü yapılır.
+- Bağlantı koptuğunda oyuncuya 10 saniye süreyle yeniden bağlanma toleransı tanınır; eski socket'in geç `disconnect` olayı yeni bağlantıyı geçersiz kılmaz.
+
+### Socket.io event'leri
+
+| Event | Yön | Açıklama |
+| --- | --- | --- |
+| `room:create` | client → server | 6 haneli kodlu oda açar |
+| `room:join` | client → server | Kodla odaya katılır |
+| `room:leave` | client → server | Odadan ayrılır |
+| `lobby:ready` | client → server | Hazır durumunu günceller |
+| `match:start` | client → server | Oda sahibi maçı başlatır |
+| `shot:submit` | client → server | Forvetin hedef bölgesini gönderir |
+| `save:submit` | client → server | Kalecinin kurtarış bölgesini gönderir |
+| `match:next` | client → server | Sonraki tura geçer |
+| `room:state` / `room:playerJoined` / `lobby:playerReady` | server → client | Lobide canlı oyuncu listesi |
+| `match:started` | server → client | Maç başlar, roller dağıtılır |
+| `round:result` | server → client | Sonuç açıklanır (`GOL` / `KURTARDI`) |
+| `round:ready` | server → client | Yeni tur hazır |
+| `match:finished` | server → client | Maç sona erer |
+
+Vuruş/kurtarış senkronizasyonu sunucuda yapılır: iki taraf da seçimini göndermeden sonuç açıklanmaz. Aynı bölge seçilirse `KURTARDI`, farklı bölge seçilirse `GOL` sonucu üretilir. Aynı oyuncu ikinci kez gönderim yaparsa istek yok sayılır (idempotent).
 
 ## Prototipte bulunanlar
 
 - Koyu temalı mobil lobby
-- 1v1 düello ve 3 kişilik turnuva modu
+- Gerçek zamanlı 1v1 düello (iki cihaz / iki tarayıcı)
 - Oda kodu oluşturma / odaya katılma akışı
-- Hazır durumları ve oyuncu slotları
+- Canlı hazır durumları ve oyuncu slotları
+- Hazır durumlar tamamlanınca maçın otomatik başlaması
 - Hedef alanına dokunarak manuel vuruş/kurtarış seçimi
-- Vuruşu Gönder ve Rakip Kurtar butonlarıyla iki tarafın ayrı kilitlemesi
-- `Oyuncu bekleniyor…` geri bildirimi
-- 3 · 2 · 1 · VUR! geri sayım animasyonu
-- Forvet ve kalecı rolleri
+- iki tarafın ayrı kilitlemesi ve `Oyuncu bekleniyor…` geri bildirimi
+- Düdük, vuruş, tribün ve gol sesleri
+- Forvet ve kalecı rolleri (tur tur değişir)
 - 5 + 5 vuruş ve altın penaltı
-- GOL / KURTARDI / KAÇIRDI sonuç animasyonları
+- GOL / KURTARDI sonuç animasyonları ve skor senkronizasyonu
 - Gol, kurtarış ve vuruş istatistikleri
-- Turnuva maç kartları ve canlı sıralama
-- `PAZARA ÇIKIYOR!` arkadaşlık cezası kartı
+- Bağlantı koptuğunda uyarı ve maç sonlandırma
+- Maçtan çıkış ve lobiden çıkış için onay penceresi
+- Menü müziği sayfalar arasında kesintisiz devam eder
 - Vuruş animasyonunda yalnızca top hareket eder; dokunma/aim çemberi başlangıç noktasında kalır.
 - Oyun topu vektörel SVG assetiyle görünür: `assets/clker-free-vector-images-soccer-ball-310065.svg`
 - Kaleci görseli `assets/goalkeeper.png` assetiyle görünür.
@@ -78,4 +108,14 @@ Oyuncu adı, oda kodu ve oda durumu `sessionStorage` üzerinden sayfalar arasın
 
 ## Not
 
-Bu sürüm, iki cihaz arasında gerçek ağ bağlantısı kurmadan tek cihazda akışı denemek için bot rakip kullanır. Gerçek multiplayer sürümü için sonraki adım; oda kodu, hazır durumu, eşzamanlı vuruş gönderimi ve sonuç doğrulamasını yöneten bir WebSocket/API sunucusudur. WebSocket sunucusu eklenmeden kimlik doğrulama, sıralama veya gerçek oyuncu eşleştirmesi yapılmamalıdır.
+- Oda durumu bellekte tutulur; sunucu yeniden başladığında odalar sıfırlanır. Kalıcı veri tabanı bu aşamanın kapsamı dışındadır.
+- Kimlik doğrulama veya kullanıcı hesapları bulunmamaktadır; oyuncular `sessionStorage` içindeki anonim token ile eşleştirilir.
+- 3 kişilik turnuva modunun gerçek zamanlı senkronizasyonu ayrı bir aşamada ele alınacaktır.
+- Gerçek para, bahis veya casino özellikleri kapsam dışıdır.
+
+## Deployment (Railway)
+
+`package.json` içindeki `start` komutu `node server.js` olarak çalışır. Deploy sonrası:
+
+1. Deploy Logs'ta `Server listening on port XXXX` satırını doğrulayın.
+2. Tarayıcı konsolunda ağ sekmesinden websocket filtresiyle bağlantının `101 Switching Protocols` döndüğünü doğrulayın.

@@ -13,73 +13,135 @@
   const readyButtonLabel = document.querySelector("#readyButtonLabel");
   const startButton = document.querySelector("#startButton");
   const copyCodeButton = document.querySelector("#copyCodeButton");
+
   let room = null;
+  let starting = false;
+  let navigatingToGame = false;
+  let socketBindings = [];
 
   const materialIcon = (name) => `<span class="material-symbols-rounded" aria-hidden="true">${name}</span>`;
 
   function totalPlayers() {
-    return room?.mode === "tournament" ? 3 : 2;
-  }
-
-  function ensureDemoOpponent() {
-    if (!room?.isDemo) return;
-    const total = totalPlayers();
-    if (room.players.length >= total) return;
-    const botNames = ["MERT", "AYLA", "KAF"];
-    while (room.players.length < total) {
-      const index = room.players.length;
-      room.players.push({ id: `bot-demo-${index}`, name: botNames[index] || "RAKİP", ready: true, bot: true });
-    }
-    shared.setRoomState(room);
+    return Number(room?.maxPlayers) || 2;
   }
 
   function currentPlayer() {
-    return room?.players.find((player) => player.id === shared.getPlayerId()) || room?.players.find((player) => !player.bot);
+    return room?.players?.find((player) => player.id === shared.getPlayerToken()) || null;
+  }
+
+  function isHost() {
+    return Boolean(currentPlayer()?.isHost);
+  }
+
+  function allPlayersReady() {
+    const players = room?.players || [];
+    return players.length === totalPlayers()
+      && players.every((player) => player.connected !== false && player.ready);
+  }
+
+  function setRoom(nextRoom) {
+    if (!nextRoom) return;
+    room = nextRoom;
+    shared.setRoomSnapshot(room, room.code);
+    render();
+    if (room.status === "in_progress") {
+      goToGame();
+      return;
+    }
+    maybeStartMatch();
   }
 
   function render() {
     if (!room) return;
-    const total = totalPlayers();
     const players = room.players || [];
-    const allReady = players.length === total && players.every((player) => player.ready);
+    const total = totalPlayers();
     const you = currentPlayer();
-    const youReady = Boolean(you?.ready);
+    const readyCount = players.filter((player) => player.ready && player.connected !== false).length;
+    const allReady = allPlayersReady();
 
     if (roomCodeLabel) roomCodeLabel.textContent = room.code || "----";
     if (lobbyRoomLabel) lobbyRoomLabel.textContent = `ODA · ${room.code || "----"}`;
     if (roomPlayerCount) roomPlayerCount.textContent = `${players.length}/${total} oyuncu`;
     if (lobbyPlayerCount) lobbyPlayerCount.textContent = `${players.length}/${total}`;
-    if (lobbyTitle) lobbyTitle.textContent = room.mode === "tournament" ? "3'lü Turnuva" : "1v1 Düello";
+    if (lobbyTitle) lobbyTitle.textContent = "1v1 Düello";
 
     const slots = [];
     players.forEach((player) => {
-      const isYou = player.id === shared.getPlayerId();
-      const status = player.ready ? "HAZIR" : "BEKLENİYOR";
+      const isYou = player.id === shared.getPlayerToken();
+      const connected = player.connected !== false;
+      const status = !connected ? "BAĞLANTI KOPTU" : player.ready ? "HAZIR" : "BEKLENİYOR";
+      const statusClass = !connected ? "slot-status--waiting" : player.ready ? "slot-status--ready" : "slot-status--waiting";
       slots.push(`
         <div class="player-slot ${isYou ? "player-slot--you" : ""}" role="listitem">
-          <div class="player-avatar">${materialIcon(player.bot ? "person" : "sports_soccer")}</div>
-          <div class="player-slot-copy"><strong>${shared.escapeHTML(player.name)}${isYou ? " · SEN" : ""}</strong><small>${player.bot ? "Bot rakip" : "Oyuncu"}</small></div>
-          <span class="slot-status ${player.ready ? "slot-status--ready" : "slot-status--waiting"}"><i class="status-dot ${player.ready ? "status-dot--online" : ""}"></i>${status}</span>
+          <div class="player-avatar">${materialIcon(isYou ? "sports_soccer" : "person")}</div>
+          <div class="player-slot-copy"><strong>${shared.escapeHTML(player.nickname || "OYUNCU")}${isYou ? " · SEN" : ""}</strong><small>${player.isHost ? "Oda sahibi" : "Oyuncu"}</small></div>
+          <span class="slot-status ${statusClass}"><i class="status-dot ${connected && player.ready ? "status-dot--online" : ""}"></i>${status}</span>
         </div>
       `);
     });
     for (let index = players.length; index < total; index += 1) {
-      slots.push(`<div class="player-slot player-slot--empty" role="listitem"><div class="player-avatar">${materialIcon("person_add")}</div><div class="player-slot-copy"><strong>Oyuncu ${index + 1}</strong><small>Kodla davet et</small></div><span class="slot-status">BEKLEMEDE</span></div>`);
+      slots.push(`
+        <div class="player-slot player-slot--empty" role="listitem">
+          <div class="player-avatar">${materialIcon("person_add")}</div>
+          <div class="player-slot-copy"><strong>Oyuncu ${index + 1}</strong><small>Kodla davet et</small></div>
+          <span class="slot-status">BEKLEMEDE</span>
+        </div>
+      `);
     }
     if (lobbyPlayerSlots) lobbyPlayerSlots.innerHTML = slots.join("");
 
     if (readyButton) {
-      readyButton.disabled = !you;
-      readyButton.classList.toggle("is-ready", youReady);
+      readyButton.disabled = !you || room.status !== "waiting" || you.connected === false;
+      readyButton.classList.toggle("is-ready", Boolean(you?.ready));
     }
-    if (readyButtonLabel) readyButtonLabel.textContent = youReady ? "HAZIRSIN" : "HAZIR OL";
+    if (readyButtonLabel) readyButtonLabel.textContent = you?.ready ? "HAZIRSIN" : "HAZIR OL";
     if (readyBarText) {
-      readyBarText.textContent = allReady ? "Herkes hazır! Maçı başlatabilirsin." : `${players.filter((player) => player.ready).length}/${total} oyuncu hazır`;
+      if (players.some((player) => player.connected === false)) readyBarText.textContent = "Rakip bağlantısı bekleniyor…";
+      else if (allReady) readyBarText.textContent = "Herkes hazır! Maç başlıyor…";
+      else readyBarText.textContent = `${readyCount}/${total} oyuncu hazır`;
     }
     if (startButton) {
       startButton.classList.add("is-visible");
-      startButton.disabled = !allReady;
-      startButton.innerHTML = `${room.mode === "tournament" ? "TURNUVAYI BAŞLAT" : "MAÇI BAŞLAT"} ${materialIcon("arrow_forward")}`;
+      startButton.disabled = !isHost() || !allReady || starting || room.status !== "waiting";
+      startButton.innerHTML = isHost() ? `MAÇI BAŞLAT ${materialIcon("arrow_forward")}` : `RAKİP HAZIR OLSUN ${materialIcon("arrow_forward")}`;
+    }
+  }
+
+  async function goToGame() {
+    if (navigatingToGame || !room?.code) return;
+    navigatingToGame = true;
+    shared.stopMenuMusic();
+    shared.setGameLaunch({ code: room.code, mode: "duo", startedAt: Date.now() });
+    await shared.playLoading(350);
+    shared.goTo("game.html");
+  }
+
+  async function maybeStartMatch() {
+    if (starting || navigatingToGame || !room || room.status !== "waiting" || !isHost() || !allPlayersReady()) return;
+    starting = true;
+    render();
+    try {
+      const response = await shared.emitWithAck("match:start");
+      if (!response?.ok) throw new Error(response?.error?.message || "Maç başlatılamadı.");
+    } catch (error) {
+      starting = false;
+      if (readyBarText) readyBarText.textContent = error.message || "Maç başlatılamadı.";
+      render();
+    }
+  }
+
+  async function toggleReady() {
+    const you = currentPlayer();
+    if (!you || room?.status !== "waiting") return;
+    const nextReady = !you.ready;
+    if (readyButton) readyButton.disabled = true;
+    try {
+      const response = await shared.emitWithAck("lobby:ready", { ready: nextReady });
+      if (!response?.ok) throw new Error(response?.error?.message || "Hazır durumu güncellenemedi.");
+      if (response.room) setRoom(response.room);
+    } catch (error) {
+      if (readyBarText) readyBarText.textContent = error.message || "Hazır durumu güncellenemedi.";
+      render();
     }
   }
 
@@ -96,38 +158,86 @@
     }, 1400);
   }
 
-  async function init() {
-    if (!shared.requirePlayerName()) return;
-    shared.bindSoundToggle();
-    room = shared.getRoomState();
-    if (!room?.code) {
+  function waitForSocket() {
+    if (shared.isSocketConnected()) return Promise.resolve();
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        offConnect?.();
+        resolve();
+      };
+      const timer = window.setTimeout(finish, 5000);
+      const offConnect = shared.onSocket("connect", finish);
+    });
+  }
+
+  async function rejoinRoom() {
+    const snapshot = shared.getRoomState();
+    if (!snapshot?.code) {
       shared.goTo("index.html");
       return;
     }
-    ensureDemoOpponent();
-    render();
+    try {
+      const response = await shared.emitWithAck("room:rejoin", {
+        code: snapshot.code,
+        nickname: shared.getPlayerName(),
+        playerToken: shared.getPlayerToken(),
+      });
+      if (!response?.ok) {
+        if (readyBarText) readyBarText.textContent = response?.error?.message || "Oda bulunamadı.";
+        return;
+      }
+      if (response.room) setRoom(response.room);
+      if (response.started) goToGame();
+    } catch (error) {
+      if (readyBarText) readyBarText.textContent = error.message || "Sunucuya bağlanılamadı.";
+    }
+  }
 
-    readyButton?.addEventListener("click", () => {
-      const you = currentPlayer();
-      if (!you) return;
-      you.ready = !you.ready;
-      shared.setRoomState(room);
-      render();
-    });
+  function bindSocketEvents() {
+    socketBindings = [
+      shared.onSocket("room:state", (payload) => setRoom(payload)),
+      shared.onSocket("room:playerJoined", (payload) => setRoom(payload?.room)),
+      shared.onSocket("lobby:playerReady", (payload) => setRoom(payload?.room)),
+      shared.onSocket("room:playerLeft", (payload) => setRoom(payload?.room)),
+      shared.onSocket("room:playerReconnected", (payload) => setRoom(payload?.room)),
+      shared.onSocket("opponent:disconnected", (payload) => {
+        setRoom(payload?.room);
+        if (readyBarText) readyBarText.textContent = payload?.message || "Rakip bağlantısı kesildi.";
+      }),
+      shared.onSocket("match:started", (payload) => {
+        if (payload?.room) setRoom(payload.room);
+        goToGame();
+      }),
+      shared.onSocket("room:error", (payload) => {
+        if (readyBarText) readyBarText.textContent = payload?.message || "Oda işlemi başarısız.";
+        starting = false;
+        render();
+      }),
+      shared.onSocket("connect_error", () => {
+        if (readyBarText) readyBarText.textContent = "Sunucuya bağlanılamadı.";
+      }),
+    ];
+  }
 
-    startButton?.addEventListener("click", async () => {
-      if (startButton.disabled) return;
-      shared.stopMenuMusic();
-      shared.setGameLaunch({ code: room.code, mode: room.mode || "duo", startedAt: Date.now() });
-      await shared.playLoading(450);
-      shared.goTo("game.html");
-    });
+  async function init() {
+    if (!shared.requirePlayerName()) return;
+    shared.bindSoundToggle();
+    bindSocketEvents();
+
+    readyButton?.addEventListener("click", toggleReady);
+    startButton?.addEventListener("click", maybeStartMatch);
     copyCodeButton?.addEventListener("click", copyRoomCode);
     document.querySelectorAll(".lobby-page-actions .back-link, .flow-topline .back-link").forEach((link) => {
-      link.addEventListener("click", () => shared.clearRoomState());
+      link.addEventListener("click", () => shared.leaveRoom());
     });
 
     await shared.playLoading(shared.getInitialLoadingDuration());
+    await waitForSocket();
+    await rejoinRoom();
     render();
   }
 

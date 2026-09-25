@@ -10,6 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Inter:wght@400;500;600;700;800;900&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400,0,0&family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
+    <script src="/socket.io/socket.io.js"></script>
     <script src="js/shared.js" defer></script>
     <script src="js/game.js" defer></script>
     <script src="js/game-page.js" defer></script>
@@ -79,7 +80,7 @@
           <div class="join-panel" id="joinPanel" hidden>
             <label for="roomCodeInput">ODAKODU</label>
             <div class="join-panel-row">
-              <input id="roomCodeInput" type="text" inputmode="latin" maxlength="4" autocomplete="off" placeholder="ABCD" aria-label="4 haneli oda kodu" />
+              <input id="roomCodeInput" type="text" inputmode="text" maxlength="6" autocomplete="off" placeholder="AB3F9K" aria-label="6 haneli oda kodu" />
               <button class="small-button" id="joinConfirmButton" type="button">KATIL</button>
             </div>
             <p class="form-hint">Demooda harf ve rakamları kullanabilirsin.</p>

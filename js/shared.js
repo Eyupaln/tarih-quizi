@@ -4,6 +4,7 @@
   const STORAGE_KEYS = {
     playerName: "penalti.playerName",
     playerId: "penalti.playerId",
+    playerToken: "penalti.playerToken",
     roomCode: "penalti.roomCode",
     roomState: "penalti.roomState",
     gameLaunch: "penalti.gameLaunch",
@@ -94,22 +95,87 @@
     return result;
   }
 
-  function getPlayerId() {
-    let playerId = readStorage(STORAGE_KEYS.playerId, "");
-    if (!playerId) {
-      playerId = `player-${Date.now().toString(36)}`;
-      writeStorage(STORAGE_KEYS.playerId, playerId);
+  function getPlayerToken() {
+    let token = readStorage(STORAGE_KEYS.playerToken, "");
+    if (!token) {
+      token = window.crypto?.randomUUID?.() || `guest-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+      writeStorage(STORAGE_KEYS.playerToken, token);
     }
-    return playerId;
+    return token;
+  }
+
+  function getPlayerId() {
+    return getPlayerToken();
+  }
+
+  const socket = typeof window.io === "function"
+    ? window.io({
+      autoConnect: true,
+      transports: ["websocket", "polling"],
+      auth: { playerToken: getPlayerToken() },
+    })
+    : null;
+
+  function isSocketConnected() {
+    return Boolean(socket?.connected);
+  }
+
+  function onSocket(eventName, handler) {
+    if (!socket) return () => {};
+    socket.on(eventName, handler);
+    return () => socket.off(eventName, handler);
+  }
+
+  function onceSocket(eventName, handler) {
+    if (!socket) return () => {};
+    socket.once(eventName, handler);
+    return () => socket.off(eventName, handler);
+  }
+
+  function emitWithAck(eventName, payload = {}, timeout = 10000) {
+    if (!socket) {
+      return Promise.reject(new Error("Sunucu bağlantısı bulunamadı."));
+    }
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error("Sunucu yanıt vermedi."));
+      }, timeout);
+      socket.emit(eventName, payload, (response) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(response);
+      });
+    });
+  }
+
+  function setRoomSnapshot(room, code = room?.code) {
+    if (!room) return null;
+    const snapshot = {
+      ...room,
+      code: code || room.code,
+      isDemo: false,
+      updatedAt: Date.now(),
+    };
+    setRoomState(snapshot);
+    return snapshot;
+  }
+
+  function leaveRoom() {
+    if (socket) socket.emit("room:leave");
+    clearRoomState();
   }
 
   function randomRoomCode() {
-    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    return Array.from({ length: 4 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
+    const alphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+    return Array.from({ length: 6 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
   }
 
   function normalizeRoomCode(value) {
-    return String(value ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4);
+    return String(value ?? "").toUpperCase().replace(/[^2-9A-HJ-NP-Z]/g, "").slice(0, 6);
   }
 
   function getRoomState() {
@@ -437,6 +503,14 @@
     getPlayerName,
     setPlayerName,
     getPlayerId,
+    getPlayerToken,
+    socket,
+    isSocketConnected,
+    onSocket,
+    onceSocket,
+    emitWithAck,
+    setRoomSnapshot,
+    leaveRoom,
     randomRoomCode,
     normalizeRoomCode,
     getRoomState,

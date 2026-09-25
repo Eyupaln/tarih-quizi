@@ -4,26 +4,24 @@
   const shared = window.PenaltiShared;
   const submitButton = document.querySelector("#createRoomSubmit");
   const playerNameLabel = document.querySelector("#createRoomPlayerName");
-  const playerCountLabel = document.querySelector("#createRoomPlayerCount");
-  const roomCopy = document.querySelector("#createRoomCopy");
-  const modeButtons = [...document.querySelectorAll("#createRoomModeSwitch [data-mode]")];
-  let selectedMode = "duo";
+  const errorLabel = document.querySelector("#createRoomError");
 
-  function selectMode(mode) {
-    selectedMode = mode === "tournament" ? "tournament" : "duo";
-    const total = selectedMode === "tournament" ? 3 : 2;
+  async function createRoom() {
+    if (submitButton) submitButton.disabled = true;
+    if (errorLabel) errorLabel.textContent = "";
 
-    modeButtons.forEach((button) => {
-      const isActive = button.dataset.mode === selectedMode;
-      button.classList.toggle("mode-button--active", isActive);
-      button.setAttribute("aria-selected", String(isActive));
-    });
-
-    if (playerCountLabel) playerCountLabel.textContent = `1/${total}`;
-    if (roomCopy) {
-      roomCopy.textContent = selectedMode === "tournament"
-        ? "Üç oyunculu turnuva için 4 haneli oda kodu otomatik oluşturulacak."
-        : "Rakibinle paylaşacağın 4 haneli oda kodu otomatik oluşturulacak.";
+    try {
+      const response = await shared.emitWithAck("room:create", {
+        nickname: shared.getPlayerName(),
+        playerToken: shared.getPlayerToken(),
+      });
+      if (!response?.ok || !response.room) throw new Error(response?.error?.message || "Oda oluşturulamadı.");
+      shared.setRoomSnapshot(response.room, response.code);
+      await shared.playLoading(350);
+      shared.goTo("lobby.html");
+    } catch (error) {
+      if (errorLabel) errorLabel.textContent = error.message || "Oda oluşturulamadı.";
+      if (submitButton) submitButton.disabled = false;
     }
   }
 
@@ -31,31 +29,7 @@
     if (!shared.requirePlayerName()) return;
     shared.bindSoundToggle();
     if (playerNameLabel) playerNameLabel.textContent = shared.getPlayerName();
-
-    modeButtons.forEach((button) => {
-      button.addEventListener("click", () => selectMode(button.dataset.mode));
-    });
-    selectMode(selectedMode);
-
-    submitButton?.addEventListener("click", async () => {
-      if (submitButton) submitButton.disabled = true;
-      const playerName = shared.getPlayerName();
-      const roomCode = shared.randomRoomCode();
-      const playerId = shared.getPlayerId();
-      shared.setRoomState({
-        code: roomCode,
-        mode: selectedMode,
-        hostId: playerId,
-        hostName: playerName,
-        status: "waiting",
-        createdAt: Date.now(),
-        isDemo: true,
-        players: [{ id: playerId, name: playerName, ready: false, bot: false }],
-      });
-      await shared.playLoading(450);
-      shared.goTo("lobby.html");
-    });
-
+    submitButton?.addEventListener("click", createRoom);
     await shared.playLoading(shared.getInitialLoadingDuration());
   }
 
