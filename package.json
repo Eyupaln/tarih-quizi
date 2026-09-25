@@ -1,0 +1,12 @@
+{
+  "name": "tarih-quizi",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Penaltı Düello statik web uygulaması",
+  "scripts": {
+    "start": "npx serve -s . -l ${PORT:-3000}"
+  },
+  "dependencies": {
+    "serve": "^14.2.4"
+  }
+}

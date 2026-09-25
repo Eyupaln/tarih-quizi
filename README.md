@@ -25,13 +25,20 @@ Gerçek para, bahis, casino veya gerçek ödül özellikleri kapsam dışıdır.
 
 ## Çalıştırma
 
-Bu klasörde `index.html` dosyasını doğrudan tarayıcıda açabilirsin. Alternatif olarak Node.js kuruluysa:
+Sayfalar arası `sessionStorage` akışını sorunsuz kullanmak için projeyi basit bir HTTP sunucusu üzerinden çalıştır:
+
+```bash
+npm install
+npm start
+```
+
+Varsayılan olarak `http://localhost:3000` adresi açılır. Alternatif olarak:
 
 ```bash
 npx serve .
 ```
 
-Ardından tarayıcıda açılan adresi kullan.
+Railway veya benzeri Node.js barındırma servislerinde `PORT` ortam değişkeni otomatik olarak kullanılır.
 
 ## Ekran akışı
 
