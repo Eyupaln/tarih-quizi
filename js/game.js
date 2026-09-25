@@ -107,6 +107,10 @@
     rulesSheet: $("#rulesSheet"),
     rulesBackdrop: $("#rulesBackdrop"),
     closeRulesButton: $("#closeRulesButton"),
+    exitConfirmOverlay: $("#exitConfirmOverlay"),
+    exitConfirmBackdrop: $("#exitConfirmBackdrop"),
+    exitConfirmCancel: $("#exitConfirmCancel"),
+    exitConfirmConfirm: $("#exitConfirmConfirm"),
   };
 
   const loadingVisitKey = "penalti-duello-loading-seen";
@@ -234,6 +238,7 @@
     els.countdownOverlay.hidden = true;
     els.resultOverlay.hidden = true;
     els.rulesSheet.hidden = true;
+    if (els.exitConfirmOverlay) els.exitConfirmOverlay.hidden = true;
   }
 
   function showToast(message, tone = "green") {
@@ -1298,6 +1303,29 @@
     els.rulesSheet.hidden = true;
   }
 
+  function openExitConfirmation() {
+    if (!els.exitConfirmOverlay) return;
+    els.exitConfirmOverlay.hidden = false;
+    els.exitConfirmCancel?.focus();
+  }
+
+  function closeExitConfirmation() {
+    if (els.exitConfirmOverlay) els.exitConfirmOverlay.hidden = true;
+  }
+
+  function leaveCurrentMatch() {
+    closeExitConfirmation();
+    if (state.match?.tournamentIndex !== null && state.match?.tournamentIndex !== undefined) {
+      stopCrowdAmbience();
+      state.match = null;
+      clearMatchTimers();
+      hideOverlays();
+      showTournament();
+    } else {
+      exitToLobby();
+    }
+  }
+
   // Events
   $$(".mode-button").forEach((button) => button.addEventListener("click", () => setMode(button.dataset.mode)));
   els.createRoomButton.addEventListener("click", () => setupDemoRoom());
@@ -1314,16 +1342,12 @@
   els.startButton.addEventListener("click", startRoom);
   els.quickDemoButton.addEventListener("click", quickDemo);
   els.leaveMatchButton.addEventListener("click", () => {
-    if (state.match?.tournamentIndex !== null && state.match?.tournamentIndex !== undefined) {
-      stopCrowdAmbience();
-      state.match = null;
-      clearMatchTimers();
-      hideOverlays();
-      showTournament();
-    } else {
-      exitToLobby();
-    }
+    if (state.match && state.match.phase !== "finished") openExitConfirmation();
+    else leaveCurrentMatch();
   });
+  els.exitConfirmCancel?.addEventListener("click", closeExitConfirmation);
+  els.exitConfirmConfirm?.addEventListener("click", leaveCurrentMatch);
+  els.exitConfirmBackdrop?.addEventListener("click", closeExitConfirmation);
   els.leaveTournamentButton.addEventListener("click", leaveTournament);
   els.tournamentNextButton.addEventListener("click", tournamentNext);
   els.confirmButton.addEventListener("click", confirmUserAction);
@@ -1343,8 +1367,8 @@
   els.rulesBackdrop.addEventListener("click", closeRules);
   els.brandHome.addEventListener("click", (event) => {
     event.preventDefault();
-    if (state.tournament && !state.match) showTournament();
-    else exitToLobby();
+    stopCrowdAmbience();
+    window.location.href = "index.html";
   });
   els.soundToggle.addEventListener("click", () => {
     state.sound = !state.sound;
@@ -1359,7 +1383,8 @@
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
-      if (!els.rulesSheet.hidden) closeRules();
+      if (els.exitConfirmOverlay && !els.exitConfirmOverlay.hidden) closeExitConfirmation();
+      else if (!els.rulesSheet.hidden) closeRules();
       else if (!els.resultOverlay.hidden) handleResultSecondary();
     }
   });

@@ -330,11 +330,20 @@
   }
 
   function stopMenuMusic() {
+    if (menuMusicActive && menuPlayers) {
+      const trackIndex = currentMenuTrack ? menuPlayers.indexOf(currentMenuTrack) : lastMenuTrackIndex;
+      const position = currentMenuTrack?.currentTime || 0;
+      menuPlayers.forEach((player) => player.pause());
+      persistMenuMusicState(trackIndex, position);
+    }
     menuMusicActive = false;
     currentMenuTrack = null;
+  }
+
+  function clearMenuMusic() {
+    stopMenuMusic();
     if (menuPlayers) {
       menuPlayers.forEach((player) => {
-        player.pause();
         try {
           player.currentTime = 0;
         } catch {
@@ -402,6 +411,7 @@
     resumeMenuMusic,
     pauseMenuMusic,
     stopMenuMusic,
+    clearMenuMusic,
     bindSoundToggle,
   };
 })();

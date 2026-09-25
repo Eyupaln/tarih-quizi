@@ -32,7 +32,7 @@
 
     <main class="app-shell is-lobby" id="appShell">
       <header class="app-header">
-        <a class="brand" href="#" aria-label="Penaltı Düello ana sayfa" id="brandHome">
+        <a class="brand" href="index.html" aria-label="Penaltı Düello ana sayfa" id="brandHome">
           <span class="brand-mark" aria-hidden="true">
             <img class="brand-logo-image" src="assets/occ.png" alt="" />
           </span>
@@ -285,6 +285,23 @@
           <div class="result-stats" id="resultStats"></div>
           <button class="result-primary" id="resultPrimaryButton" type="button">SONRAKİ VURUŞ <span class="material-symbols-rounded">arrow_forward</span></button>
           <button class="result-secondary" id="resultSecondaryButton" type="button">LOBİYE DÖN</button>
+        </div>
+      </div>
+
+      <div class="exit-confirm-overlay" id="exitConfirmOverlay" hidden>
+        <div class="exit-confirm-backdrop" id="exitConfirmBackdrop"></div>
+        <div class="exit-confirm-card" role="dialog" aria-modal="true" aria-labelledby="exitConfirmTitle" aria-describedby="exitConfirmText">
+          <span class="eyebrow">MAÇTAN ÇIKIŞ</span>
+          <h2 id="exitConfirmTitle">Emin misiniz?</h2>
+          <p id="exitConfirmText">Maçtan çıkarsanız bu maç sonuçlanmadan kapanacak.</p>
+          <div class="exit-confirm-actions">
+            <button class="exit-confirm-button exit-confirm-button--cancel" id="exitConfirmCancel" type="button" aria-label="Vazgeç" title="Vazgeç">
+              <span class="material-symbols-rounded" aria-hidden="true">close</span>
+            </button>
+            <button class="exit-confirm-button exit-confirm-button--confirm" id="exitConfirmConfirm" type="button" aria-label="Maçtan çık" title="Maçtan çık">
+              <span class="material-symbols-rounded" aria-hidden="true">check</span>
+            </button>
+          </div>
         </div>
       </div>
 
