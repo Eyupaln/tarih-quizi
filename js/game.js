@@ -381,6 +381,23 @@
     }
   }
 
+  function launchFromRoom(roomCode, mode = "duo") {
+    setMode(mode === "tournament" ? "tournament" : "duo");
+    setupDemoRoom(roomCode);
+    const you = state.players.find((player) => player.id === "you");
+    if (you) {
+      you.ready = true;
+      if (window.PenaltiShared?.getPlayerName) you.name = window.PenaltiShared.getPlayerName();
+    }
+    renderLobby();
+    startRoom();
+  }
+
+  window.PenaltiGame = {
+    launchFromRoom,
+    getState: () => state,
+  };
+
   function quickDemo() {
     setupDemoRoom();
     const you = state.players.find((player) => player.id === "you");
@@ -960,6 +977,10 @@
   }
 
   function exitToLobby() {
+    if (document.body.dataset.page === "game") {
+      window.location.href = "lobby.html";
+      return;
+    }
     clearMatchTimers();
     hideOverlays();
     state.match = null;
@@ -1152,6 +1173,10 @@
   }
 
   function leaveTournament() {
+    if (document.body.dataset.page === "game") {
+      window.location.href = "lobby.html";
+      return;
+    }
     state.match = null;
     state.tournament = null;
     state.room = false;

@@ -3397,7 +3397,10 @@ body.is-loading {
 }
 
 .players-card {
-  border-top-color: rgba(0, 255, 102, 0.35);
+  border: 0;
+  border-radius: 6px;
+  background: url("assets/Frame 6.svg") center / 100% 100% no-repeat;
+  box-shadow: none;
 }
 
 .section-heading h2 {
@@ -3817,6 +3820,304 @@ body.is-loading {
     font-size: 58px;
   }
 
+}
+
+/* Entry and page-flow screens */
+.entry-screen {
+  min-height: calc(100vh - 110px);
+  display: grid;
+  place-items: center;
+  padding: 18px 0 30px;
+}
+
+.entry-card {
+  width: min(100%, 390px);
+  padding: 24px 20px 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(31, 40, 51, 0.96), rgba(18, 22, 30, 0.98));
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.entry-card h1 {
+  margin: 8px 0 7px;
+  color: #f2fbfd;
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  line-height: 0.95;
+}
+
+.entry-card p {
+  margin: 0 0 19px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.entry-card form {
+  display: grid;
+  gap: 8px;
+}
+
+.entry-card label,
+.flow-card label {
+  color: #8ea7b5;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.entry-card input,
+.flow-card input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 13px;
+  border: 1px solid var(--line-bright);
+  border-radius: 8px;
+  outline: none;
+  color: var(--ink);
+  background: rgba(3, 15, 25, 0.64);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  letter-spacing: 0.08em;
+}
+
+.entry-card input:focus,
+.flow-card input:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(0, 255, 102, 0.1);
+}
+
+.form-error {
+  min-height: 16px;
+  margin: 0;
+  color: #ff9b83;
+  font-size: 10px;
+}
+
+.flow-page {
+  width: 100%;
+  min-width: 0;
+  padding-bottom: 24px;
+}
+
+.flow-topline,
+.flow-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.flow-topline {
+  min-height: 28px;
+  margin-bottom: 12px;
+}
+
+.flow-card {
+  min-width: 0;
+  margin-top: 0;
+}
+
+.create-room-mode {
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 6px;
+  border-radius: 8px;
+}
+
+.create-room-mode .mode-button {
+  width: 100%;
+  min-height: 76px;
+  padding: 0 14px 0 58px;
+  border-radius: 5px;
+}
+
+.create-room-mode .mode-button strong {
+  font-size: 12px;
+  letter-spacing: 0.05em;
+}
+
+.create-room-mode .mode-button small {
+  font-size: 10px;
+}
+
+.create-room-mode .mode-button--duo,
+.create-room-mode .mode-button--tournament {
+  background-position: center;
+  background-size: 100% 100%;
+}
+
+.players-card.flow-card {
+  padding: 20px 18px 18px;
+  border: 1px solid rgba(245, 247, 250, 0.16);
+  border-radius: 8px;
+  background:
+    linear-gradient(145deg, rgba(31, 40, 51, 0.98), rgba(11, 12, 16, 0.98));
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.flow-card .section-heading {
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(245, 247, 250, 0.1);
+}
+
+.flow-summary {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 68px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 255, 102, 0.24);
+  border-radius: 7px;
+  background: linear-gradient(90deg, rgba(0, 255, 102, 0.12), rgba(0, 255, 102, 0.035));
+}
+
+.flow-summary strong,
+.flow-summary small {
+  display: block;
+}
+
+.flow-summary strong {
+  overflow: hidden;
+  color: #efffff;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-summary small {
+  margin-top: 4px;
+  color: #8ca5b3;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.flow-copy {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-left: 3px solid rgba(0, 255, 102, 0.65);
+  color: #a3b7c2;
+  background: rgba(7, 19, 31, 0.58);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.flow-submit {
+  width: 100%;
+  min-width: 0;
+  min-height: 76px;
+  margin-top: 0;
+  background-size: 100% 100%;
+}
+
+body[data-page="lobby"] .players-card {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  padding: 20px;
+  overflow: hidden;
+  border: 1px solid rgba(245, 247, 250, 0.16);
+  background-color: #241719;
+}
+
+body[data-page="lobby"] .players-card::before {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background: rgba(11, 12, 16, 0.78);
+  content: "";
+  pointer-events: none;
+}
+
+body[data-page="lobby"] .players-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+body[data-page="lobby"] .section-heading {
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(245, 247, 250, 0.1);
+}
+
+body[data-page="lobby"] .player-slots {
+  gap: 10px;
+}
+
+body[data-page="lobby"] .player-slot {
+  width: 100%;
+  min-height: 64px;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  padding: 8px 11px 8px 8px;
+}
+
+body[data-page="lobby"] .player-avatar {
+  width: 46px;
+  height: 46px;
+}
+
+body[data-page="lobby"] .ready-bar {
+  width: 100%;
+  min-height: 42px;
+  margin: 16px 0 12px;
+  padding: 8px 10px;
+  border: 1px solid rgba(0, 255, 102, 0.14);
+  border-radius: 6px;
+  background: rgba(7, 19, 31, 0.72);
+}
+
+body[data-page="lobby"] .ready-button,
+body[data-page="lobby"] .start-button {
+  min-height: 50px;
+}
+
+@media (max-width: 360px) {
+  .create-room-mode .mode-button {
+    padding-right: 8px;
+    padding-left: 46px;
+  }
+
+  .create-room-mode .mode-button small {
+    font-size: 9px;
+  }
+
+  .players-card.flow-card,
+  body[data-page="lobby"] .players-card {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  body[data-page="lobby"] .player-slot {
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+  }
+
+  body[data-page="lobby"] .player-avatar {
+    width: 42px;
+    height: 42px;
+  }
+}
+
+.room-code-display {
+  color: var(--orange-bright) !important;
+}
+
+.lobby-page-actions {
+  margin-top: 14px;
+}
+
+.lobby-page-actions .back-link {
+  color: #7591a3;
 }
 
 /* Motion */

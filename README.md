@@ -4,7 +4,7 @@ Mobil öncelikli, dokunmatik etkileşimli 1v1 penaltı düellosu prototipi.
 
 ## Brand system
 
-Ana oyun ekranları `index.html`, görsel kimlik sistemiyle aynı dili kullanır: `assets/occ.png`, `#0B0C10`, `#1F2833`, `#2D1B4E`, `#F5F7FA`, `#00FF66`, `#FF6D00`, `#FFD600`, Bebas Neue, Inter ve Oswald. Tasarım kaynağı olarak yüklenen logo dosyaları ve mevcut oyun ekranları kullanılır; ayrı bir brand kit sayfası oluşturulmaz.
+Ana oyun ekranları `index.html`, `create-room.html`, `join-room.html`, `lobby.html` ve `game.html` aynı görsel kimlik sistemini kullanır: `assets/occ.png`, `#0B0C10`, `#1F2833`, `#2D1B4E`, `#F5F7FA`, `#00FF66`, `#FF6D00`, `#FFD600`, Bebas Neue, Inter ve Oswald. Tasarım kaynağı olarak yüklenen logo dosyaları ve mevcut oyun ekranları kullanılır; ayrı bir brand kit sayfası oluşturulmaz.
 
 Logo kaynağı `assets/occ.png` dosyasıdır. Şeffaf dış boşluklar kırpılarak header'da `assets/penalti-duello-logo.png` adıyla kullanılır. Önceki görsel referans `ea741936-477e-4902-bc16-d10e2e39648f.png` dosyası da korunuyor.
 
@@ -32,6 +32,19 @@ npx serve .
 ```
 
 Ardından tarayıcıda açılan adresi kullan.
+
+## Ekran akışı
+
+- `index.html`: yükleme, nickname doğrulama ve ana menü
+- `create-room.html`: oda kodu oluşturma
+- `join-room.html`: oda kodu ile katılma
+- `lobby.html`: oyuncu listesi, hazır durumu ve maç başlatma
+- `game.html`: mevcut maç ekranı ve oyun motoru
+- `js/shared.js`: nickname doğrulama, session state, loading ve ortak yardımcılar
+- Sayfaya özel JS dosyaları: `js/main.js`, `js/create-room.js`, `js/join-room.js`, `js/lobby.js`, `js/game-page.js`
+- Mevcut maç motoru `js/game.js` içinde korunuyor.
+
+Oyuncu adı, oda kodu ve oda durumu `sessionStorage` üzerinden sayfalar arasında aktarılır. Backend/socket bağlantısı eklenene kadar akış mevcut bot/demo oyuncu mantığıyla çalışır.
 
 ## Prototipte bulunanlar
 
