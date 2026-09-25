@@ -21,7 +21,7 @@
       shared.clearRoomState();
 
       const code = shared.normalizeRoomCode(codeInput?.value || "");
-      if (code.length !== 4 || code.includes("X")) {
+      if (code.length !== 4) {
         if (errorLabel) errorLabel.textContent = "Geçerli bir 4 haneli oda kodu gir.";
         codeInput?.setAttribute("aria-invalid", "true");
         codeInput?.focus();

@@ -159,7 +159,7 @@
     match: null,
     tournament: null,
     resultAction: null,
-    sound: true,
+    sound: window.PenaltiShared?.getSoundEnabled?.() ?? true,
   };
 
   let toastTimer = null;
@@ -1305,6 +1305,12 @@
 
   function openExitConfirmation() {
     if (!els.exitConfirmOverlay) return;
+    const exitText = $("#exitConfirmText");
+    if (exitText) {
+      exitText.textContent = !els.resultOverlay.hidden
+        ? "Bu sonuç ekranından çıkıp lobeye dönmek istediğine emin misin?"
+        : "Maçtan çıkarsanız bu maç sonuçlanmadan kapanacak.";
+    }
     els.exitConfirmOverlay.hidden = false;
     els.exitConfirmCancel?.focus();
   }
@@ -1324,6 +1330,16 @@
     } else {
       exitToLobby();
     }
+  }
+
+  function confirmExitAction() {
+    const fromResult = !els.resultOverlay.hidden;
+    closeExitConfirmation();
+    if (fromResult) {
+      handleResultSecondary();
+      return;
+    }
+    leaveCurrentMatch();
   }
 
   // Events
@@ -1346,7 +1362,7 @@
     else leaveCurrentMatch();
   });
   els.exitConfirmCancel?.addEventListener("click", closeExitConfirmation);
-  els.exitConfirmConfirm?.addEventListener("click", leaveCurrentMatch);
+  els.exitConfirmConfirm?.addEventListener("click", confirmExitAction);
   els.exitConfirmBackdrop?.addEventListener("click", closeExitConfirmation);
   els.leaveTournamentButton.addEventListener("click", leaveTournament);
   els.tournamentNextButton.addEventListener("click", tournamentNext);
@@ -1361,7 +1377,7 @@
     if (button) setOpponentAim(Number(button.dataset.cell));
   });
   els.resultPrimaryButton.addEventListener("click", handleResultPrimary);
-  els.resultSecondaryButton.addEventListener("click", handleResultSecondary);
+  els.resultSecondaryButton.addEventListener("click", openExitConfirmation);
   els.rulesButton.addEventListener("click", openRules);
   els.closeRulesButton.addEventListener("click", closeRules);
   els.rulesBackdrop.addEventListener("click", closeRules);
@@ -1372,6 +1388,7 @@
   });
   els.soundToggle.addEventListener("click", () => {
     state.sound = !state.sound;
+    window.PenaltiShared?.setSoundEnabled?.(state.sound);
     els.soundToggle.setAttribute("aria-pressed", String(state.sound));
     if (state.sound) {
       playTone(600, 0.07);
@@ -1385,7 +1402,7 @@
     if (event.key === "Escape") {
       if (els.exitConfirmOverlay && !els.exitConfirmOverlay.hidden) closeExitConfirmation();
       else if (!els.rulesSheet.hidden) closeRules();
-      else if (!els.resultOverlay.hidden) handleResultSecondary();
+      else if (!els.resultOverlay.hidden) openExitConfirmation();
     }
   });
 
@@ -1395,6 +1412,7 @@
   window.addEventListener("pagehide", stopCrowdAmbience);
 
   preloadMatchSounds();
+  if (els.soundToggle) els.soundToggle.setAttribute("aria-pressed", String(state.sound));
   updateModeButtons();
   renderLobby();
 })();

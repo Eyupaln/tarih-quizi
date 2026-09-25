@@ -199,6 +199,11 @@
     return readStorage(STORAGE_KEYS.sound, "true") !== "false";
   }
 
+  function setSoundEnabled(enabled) {
+    writeStorage(STORAGE_KEYS.sound, String(Boolean(enabled)));
+    syncMenuMusic();
+  }
+
   const MENU_TRACK_SOURCES = [
     encodeURI("assets/menü1.mp3"),
     encodeURI("assets/menü2.mp3"),
@@ -211,12 +216,21 @@
   let lastMenuTrackIndex = -1;
   let menuTrackBag = [];
 
+  let lastMenuPersistAt = 0;
+
   function getMenuPlayers() {
     if (menuPlayers) return menuPlayers;
-    menuPlayers = MENU_TRACK_SOURCES.map((source) => {
+    menuPlayers = MENU_TRACK_SOURCES.map((source, trackIndex) => {
       const player = new Audio(source);
       player.preload = "auto";
       player.volume = MENU_MUSIC_VOLUME;
+      player.addEventListener("timeupdate", () => {
+        if (!menuMusicActive || currentMenuTrack !== player) return;
+        const now = Date.now();
+        if (now - lastMenuPersistAt < 1500) return;
+        lastMenuPersistAt = now;
+        persistMenuMusicState(trackIndex, player.currentTime);
+      });
       player.load();
       return player;
     });
@@ -274,15 +288,41 @@
     else player.addEventListener("loadedmetadata", applyPosition, { once: true });
   }
 
+  function playWhenReady(player, beforePlay = null) {
+    if (!player) return;
+    let started = false;
+    const cleanup = () => {
+      player.removeEventListener("canplay", onReady);
+      player.removeEventListener("loadeddata", onReady);
+      window.clearTimeout(fallbackTimer);
+    };
+    const start = () => {
+      if (started) return;
+      if (player.readyState < 1) return;
+      started = true;
+      cleanup();
+      beforePlay?.();
+      const playRequest = player.play();
+      if (playRequest) playRequest.catch(() => {});
+    };
+    const onReady = () => start();
+    const fallbackTimer = window.setTimeout(start, 2500);
+
+    if (player.readyState >= 2) {
+      start();
+      return;
+    }
+    player.addEventListener("canplay", onReady);
+    player.addEventListener("loadeddata", onReady);
+  }
+
   function playMenuTrack(trackIndex, position = 0) {
     const players = getMenuPlayers();
     if (!Number.isInteger(trackIndex) || trackIndex < 0 || trackIndex >= players.length) return;
     const player = players[trackIndex];
     currentMenuTrack = player;
     lastMenuTrackIndex = trackIndex;
-    seekMenuTrack(player, position);
-    const playRequest = player.play();
-    if (playRequest) playRequest.catch(() => {});
+    playWhenReady(player, () => seekMenuTrack(player, position));
     persistMenuMusicState(trackIndex, position);
   }
 
@@ -298,10 +338,7 @@
     menuMusicActive = true;
 
     if (currentMenuTrack) {
-      if (currentMenuTrack.paused) {
-        const playRequest = currentMenuTrack.play();
-        if (playRequest) playRequest.catch(() => {});
-      }
+      if (currentMenuTrack.paused) playWhenReady(currentMenuTrack);
       return;
     }
 
@@ -316,8 +353,11 @@
 
   function startMenuMusic() {
     if (document.body?.dataset?.page === "game" || !getSoundEnabled()) return;
+    const savedState = readMenuMusicState();
+    if (!menuMusicActive && !savedState?.active) {
+      writeStorage(STORAGE_KEYS.menuMusic, JSON.stringify({ active: true, trackIndex: -1, position: 0 }));
+    }
     menuMusicActive = true;
-    writeStorage(STORAGE_KEYS.menuMusic, JSON.stringify({ active: true, trackIndex: lastMenuTrackIndex, position: 0 }));
     resumeMenuMusic();
   }
 
@@ -367,15 +407,19 @@
     update();
     button.addEventListener("click", () => {
       enabled = !enabled;
-      writeStorage(STORAGE_KEYS.sound, String(enabled));
+      setSoundEnabled(enabled);
       update();
-      syncMenuMusic();
     });
   }
 
   document.addEventListener("pointerdown", resumeMenuMusic);
   document.addEventListener("keydown", resumeMenuMusic);
   window.addEventListener("pagehide", () => {
+    if (!menuMusicActive || !currentMenuTrack || !menuPlayers) return;
+    persistMenuMusicState(menuPlayers.indexOf(currentMenuTrack), currentMenuTrack.currentTime);
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "hidden") return;
     if (!menuMusicActive || !currentMenuTrack || !menuPlayers) return;
     persistMenuMusicState(menuPlayers.indexOf(currentMenuTrack), currentMenuTrack.currentTime);
   });
@@ -407,6 +451,7 @@
     goTo,
     escapeHTML,
     getSoundEnabled,
+    setSoundEnabled,
     startMenuMusic,
     resumeMenuMusic,
     pauseMenuMusic,
