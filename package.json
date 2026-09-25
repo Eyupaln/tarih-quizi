@@ -4,7 +4,7 @@
   "private": true,
   "description": "Penaltı Düello statik web uygulaması",
   "scripts": {
-    "start": "npx serve -s . -l ${PORT:-3000}"
+    "start": "node scripts/start.js"
   },
   "dependencies": {
     "serve": "^14.2.4"
