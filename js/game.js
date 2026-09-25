@@ -163,7 +163,20 @@
   let countdownTimers = [];
   let resolveTimer = null;
   let scoreFeedbackTimer = null;
+  let shotSoundTimer = null;
   let audioContext = null;
+
+  const SOUND_SOURCES = {
+    whistle: encodeURI("assets/düdük.mp3"),
+    kick: encodeURI("assets/kick.mp3"),
+    cheer: encodeURI("assets/stadium-goal-cheer.mp3"),
+    save: encodeURI("assets/kalecikurtarış.wav"),
+    userSave: encodeURI("assets/kurtarmaben.mp3"),
+    crowd: encodeURI("assets/freesound_community-soccer-stadium-10-6709.mp3"),
+  };
+  const effectPlayers = new Map();
+  let crowdPlayer = null;
+  let crowdRequested = false;
 
   const playerYou = () => ({ id: "you", name: "SEN", avatar: "sports_soccer", ready: false, bot: false });
 
@@ -200,10 +213,12 @@
     if (roundTimer) window.clearInterval(roundTimer);
     if (resolveTimer) window.clearTimeout(resolveTimer);
     if (scoreFeedbackTimer) window.clearTimeout(scoreFeedbackTimer);
+    if (shotSoundTimer) window.clearTimeout(shotSoundTimer);
     countdownTimers.forEach((timer) => window.clearTimeout(timer));
     roundTimer = null;
     resolveTimer = null;
     scoreFeedbackTimer = null;
+    shotSoundTimer = null;
     countdownTimers = [];
     if (els.scoreFeedback) {
       els.scoreFeedback.classList.remove("is-visible", "score-feedback--goal", "score-feedback--save", "score-feedback--miss", "score-feedback--conceded");
@@ -246,6 +261,73 @@
     } catch {
       // Audio is an enhancement; browsers may block it until a gesture.
     }
+  }
+
+  function getEffectPlayer(name) {
+    const source = SOUND_SOURCES[name];
+    if (!source) return null;
+    if (!effectPlayers.has(name)) {
+      const player = new Audio(source);
+      player.preload = "auto";
+      effectPlayers.set(name, player);
+      player.load();
+    }
+    return effectPlayers.get(name);
+  }
+
+  function playSound(name, volume = 0.85) {
+    if (!state.sound) return;
+    const player = getEffectPlayer(name);
+    if (!player) return;
+    player.pause();
+    try {
+      player.currentTime = 0;
+    } catch {
+      // Some browsers reject seeking before the media is ready.
+    }
+    player.volume = Math.max(0, Math.min(1, volume));
+    const playRequest = player.play();
+    if (playRequest) playRequest.catch(() => {});
+  }
+
+  function getCrowdPlayer() {
+    if (crowdPlayer) return crowdPlayer;
+    const player = new Audio(SOUND_SOURCES.crowd);
+    player.preload = "auto";
+    player.loop = true;
+    player.volume = 0.18;
+    crowdPlayer = player;
+    player.load();
+    return crowdPlayer;
+  }
+
+  function startCrowdAmbience() {
+    crowdRequested = true;
+    if (!state.sound) return;
+    const player = getCrowdPlayer();
+    if (!player.paused) return;
+    const playRequest = player.play();
+    if (playRequest) playRequest.catch(() => {});
+  }
+
+  function stopCrowdAmbience() {
+    crowdRequested = false;
+    if (!crowdPlayer) return;
+    crowdPlayer.pause();
+    try {
+      crowdPlayer.currentTime = 0;
+    } catch {
+      // The media may not be seekable until it finishes buffering.
+    }
+  }
+
+  function resumeCrowdAmbience() {
+    if (crowdRequested && state.sound) startCrowdAmbience();
+  }
+
+  function preloadMatchSounds() {
+    ["whistle", "kick", "cheer", "save", "userSave"].forEach((name) => getEffectPlayer(name));
+    getCrowdPlayer();
   }
 
   function setMode(mode) {
@@ -455,6 +537,8 @@
     els.scoreText.textContent = "0 – 0";
     els.matchRoomLabel.textContent = `ODA · ${state.roomCode || "DEMO"}`;
     setView("match");
+    window.PenaltiShared?.stopMenuMusic?.();
+    startCrowdAmbience();
     beginRound();
   }
 
@@ -764,6 +848,7 @@
     if (!match || match.phase !== "aim" || !match.userConfirmed || !match.botConfirmed) return;
     match.phase = "countdown";
     renderMatch();
+    playSound("whistle", 0.8);
     els.countdownOverlay.hidden = false;
     const sequence = [
       { number: "3", word: "HAZIR OL", duration: 620 },
@@ -830,7 +915,14 @@
     els.football.style.setProperty("--flight-y", `${dy}px`);
     els.football.classList.add("is-flight", `is-flight--${result}`);
     setKeeperAnimation(keeperAim);
-    playTone(result === "goal" ? 880 : result === "save" ? 190 : 300, 0.13, result === "goal" ? "triangle" : "sawtooth");
+    playSound("kick", 0.9);
+    if (result === "goal") playSound("cheer", 0.9);
+    if (result === "save") {
+      const saveSound = userIsStriker() ? "save" : "userSave";
+      shotSoundTimer = window.setTimeout(() => {
+        if (state.match === match && match.phase === "resolving") playSound(saveSound, 0.92);
+      }, 420);
+    }
   }
 
   function setKeeperAnimation(aim) {
@@ -953,6 +1045,7 @@
     const match = state.match;
     if (!match) return;
     clearMatchTimers();
+    stopCrowdAmbience();
     match.phase = "finished";
     resetPitchVisuals();
     if (match.tournamentIndex !== null && !match.tournamentRecorded) {
@@ -977,6 +1070,7 @@
   }
 
   function exitToLobby() {
+    stopCrowdAmbience();
     if (document.body.dataset.page === "game") {
       window.location.href = "lobby.html";
       return;
@@ -1173,6 +1267,7 @@
   }
 
   function leaveTournament() {
+    stopCrowdAmbience();
     if (document.body.dataset.page === "game") {
       window.location.href = "lobby.html";
       return;
@@ -1214,6 +1309,7 @@
   els.quickDemoButton.addEventListener("click", quickDemo);
   els.leaveMatchButton.addEventListener("click", () => {
     if (state.match?.tournamentIndex !== null && state.match?.tournamentIndex !== undefined) {
+      stopCrowdAmbience();
       state.match = null;
       clearMatchTimers();
       hideOverlays();
@@ -1247,7 +1343,12 @@
   els.soundToggle.addEventListener("click", () => {
     state.sound = !state.sound;
     els.soundToggle.setAttribute("aria-pressed", String(state.sound));
-    if (state.sound) playTone(600, 0.07);
+    if (state.sound) {
+      playTone(600, 0.07);
+      if (state.match && state.match.phase !== "finished") startCrowdAmbience();
+    } else {
+      stopCrowdAmbience();
+    }
   });
 
   document.addEventListener("keydown", (event) => {
@@ -1257,6 +1358,12 @@
     }
   });
 
+  document.addEventListener("pointerdown", resumeCrowdAmbience);
+  document.addEventListener("keydown", resumeCrowdAmbience);
+  document.addEventListener("touchstart", resumeCrowdAmbience, { passive: true });
+  window.addEventListener("pagehide", stopCrowdAmbience);
+
+  preloadMatchSounds();
   updateModeButtons();
   renderLobby();
 })();

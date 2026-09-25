@@ -10,6 +10,7 @@
   const nicknameSubmit = document.querySelector("#nicknameSubmit");
 
   function showNickname() {
+    shared.stopMenuMusic();
     if (nicknameScreen) nicknameScreen.hidden = false;
     if (mainMenu) mainMenu.hidden = true;
     window.setTimeout(() => nicknameInput?.focus(), 80);
@@ -18,6 +19,7 @@
   function showMainMenu() {
     if (nicknameScreen) nicknameScreen.hidden = true;
     if (mainMenu) mainMenu.hidden = false;
+    shared.startMenuMusic();
   }
 
   async function init() {

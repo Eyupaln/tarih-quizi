@@ -9,6 +9,7 @@
     gameLaunch: "penalti.gameLaunch",
     loadingSeen: "penalti.loadingSeen",
     sound: "penalti.sound",
+    menuMusic: "penalti.menuMusic",
   };
 
   const bannedWords = [
@@ -194,17 +195,184 @@
       .replaceAll("'", "&#039;");
   }
 
+  function getSoundEnabled() {
+    return readStorage(STORAGE_KEYS.sound, "true") !== "false";
+  }
+
+  const MENU_TRACK_SOURCES = [
+    encodeURI("assets/menü1.mp3"),
+    encodeURI("assets/menü2.mp3"),
+    encodeURI("assets/menü3.mp3"),
+  ];
+  const MENU_MUSIC_VOLUME = 0.7;
+  let menuPlayers = null;
+  let menuMusicActive = false;
+  let currentMenuTrack = null;
+  let lastMenuTrackIndex = -1;
+  let menuTrackBag = [];
+
+  function getMenuPlayers() {
+    if (menuPlayers) return menuPlayers;
+    menuPlayers = MENU_TRACK_SOURCES.map((source) => {
+      const player = new Audio(source);
+      player.preload = "auto";
+      player.volume = MENU_MUSIC_VOLUME;
+      player.load();
+      return player;
+    });
+    return menuPlayers;
+  }
+
+  function readMenuMusicState() {
+    try {
+      const value = readStorage(STORAGE_KEYS.menuMusic, null);
+      return value ? JSON.parse(value) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function persistMenuMusicState(trackIndex = lastMenuTrackIndex, position = 0) {
+    if (!menuMusicActive) return;
+    writeStorage(STORAGE_KEYS.menuMusic, JSON.stringify({
+      active: true,
+      trackIndex,
+      position: Number.isFinite(position) && position > 0 ? position : 0,
+    }));
+  }
+
+  function refillMenuTrackBag() {
+    const players = getMenuPlayers();
+    const bag = players.map((_, index) => index);
+    for (let index = bag.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      [bag[index], bag[swapIndex]] = [bag[swapIndex], bag[index]];
+    }
+    if (lastMenuTrackIndex >= 0 && bag[0] === lastMenuTrackIndex && bag.length > 1) {
+      [bag[0], bag[1]] = [bag[1], bag[0]];
+    }
+    menuTrackBag = bag;
+  }
+
+  function takeNextMenuTrackIndex() {
+    if (menuTrackBag.length === 0) refillMenuTrackBag();
+    lastMenuTrackIndex = menuTrackBag.shift();
+    return lastMenuTrackIndex;
+  }
+
+  function seekMenuTrack(player, position) {
+    if (!(position > 0)) return;
+    const applyPosition = () => {
+      try {
+        const maxPosition = Number.isFinite(player.duration) ? Math.max(0, player.duration - 0.1) : position;
+        player.currentTime = Math.min(position, maxPosition);
+      } catch {
+        // The track may still be loading its metadata.
+      }
+    };
+    if (player.readyState >= 1) applyPosition();
+    else player.addEventListener("loadedmetadata", applyPosition, { once: true });
+  }
+
+  function playMenuTrack(trackIndex, position = 0) {
+    const players = getMenuPlayers();
+    if (!Number.isInteger(trackIndex) || trackIndex < 0 || trackIndex >= players.length) return;
+    const player = players[trackIndex];
+    currentMenuTrack = player;
+    lastMenuTrackIndex = trackIndex;
+    seekMenuTrack(player, position);
+    const playRequest = player.play();
+    if (playRequest) playRequest.catch(() => {});
+    persistMenuMusicState(trackIndex, position);
+  }
+
+  function playNextMenuTrack() {
+    if (!menuMusicActive || !getSoundEnabled()) return;
+    playMenuTrack(takeNextMenuTrackIndex());
+  }
+
+  function resumeMenuMusic() {
+    if (document.body?.dataset?.page === "game" || !getSoundEnabled()) return;
+    const savedState = readMenuMusicState();
+    if (!menuMusicActive && !savedState?.active) return;
+    menuMusicActive = true;
+
+    if (currentMenuTrack) {
+      if (currentMenuTrack.paused) {
+        const playRequest = currentMenuTrack.play();
+        if (playRequest) playRequest.catch(() => {});
+      }
+      return;
+    }
+
+    const savedIndex = Number.isInteger(savedState?.trackIndex)
+      && savedState.trackIndex >= 0
+      && savedState.trackIndex < MENU_TRACK_SOURCES.length
+      ? savedState.trackIndex
+      : null;
+    const trackIndex = savedIndex ?? takeNextMenuTrackIndex();
+    playMenuTrack(trackIndex, Number(savedState?.position) || 0);
+  }
+
+  function startMenuMusic() {
+    if (document.body?.dataset?.page === "game" || !getSoundEnabled()) return;
+    menuMusicActive = true;
+    writeStorage(STORAGE_KEYS.menuMusic, JSON.stringify({ active: true, trackIndex: lastMenuTrackIndex, position: 0 }));
+    resumeMenuMusic();
+  }
+
+  function pauseMenuMusic() {
+    if (!menuMusicActive || !menuPlayers) return;
+    const trackIndex = currentMenuTrack ? menuPlayers.indexOf(currentMenuTrack) : lastMenuTrackIndex;
+    const position = currentMenuTrack?.currentTime || 0;
+    menuPlayers.forEach((player) => player.pause());
+    persistMenuMusicState(trackIndex, position);
+  }
+
+  function stopMenuMusic() {
+    menuMusicActive = false;
+    currentMenuTrack = null;
+    if (menuPlayers) {
+      menuPlayers.forEach((player) => {
+        player.pause();
+        try {
+          player.currentTime = 0;
+        } catch {
+          // The track may still be loading its metadata.
+        }
+      });
+    }
+    removeStorage(STORAGE_KEYS.menuMusic);
+  }
+
+  function syncMenuMusic() {
+    if (getSoundEnabled()) resumeMenuMusic();
+    else pauseMenuMusic();
+  }
+
   function bindSoundToggle() {
     const button = document.querySelector("#soundToggle");
     if (!button) return;
-    let enabled = readStorage(STORAGE_KEYS.sound, "true") !== "false";
+    let enabled = getSoundEnabled();
     const update = () => button.setAttribute("aria-pressed", String(enabled));
     update();
     button.addEventListener("click", () => {
       enabled = !enabled;
       writeStorage(STORAGE_KEYS.sound, String(enabled));
       update();
+      syncMenuMusic();
     });
+  }
+
+  document.addEventListener("pointerdown", resumeMenuMusic);
+  document.addEventListener("keydown", resumeMenuMusic);
+  window.addEventListener("pagehide", () => {
+    if (!menuMusicActive || !currentMenuTrack || !menuPlayers) return;
+    persistMenuMusicState(menuPlayers.indexOf(currentMenuTrack), currentMenuTrack.currentTime);
+  });
+
+  if (document.body?.dataset?.page !== "game" && readMenuMusicState()?.active) {
+    resumeMenuMusic();
   }
 
   window.PenaltiShared = {
@@ -229,6 +397,11 @@
     requirePlayerName,
     goTo,
     escapeHTML,
+    getSoundEnabled,
+    startMenuMusic,
+    resumeMenuMusic,
+    pauseMenuMusic,
+    stopMenuMusic,
     bindSoundToggle,
   };
 })();

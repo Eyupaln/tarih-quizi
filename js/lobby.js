@@ -117,6 +117,7 @@
 
     startButton?.addEventListener("click", async () => {
       if (startButton.disabled) return;
+      shared.stopMenuMusic();
       shared.setGameLaunch({ code: room.code, mode: room.mode || "duo", startedAt: Date.now() });
       await shared.playLoading(450);
       shared.goTo("game.html");
