@@ -170,6 +170,8 @@
     whistle: encodeURI("assets/düdük.mp3"),
     kick: encodeURI("assets/kick.mp3"),
     cheer: encodeURI("assets/stadium-goal-cheer.mp3"),
+    goalNet: encodeURI("assets/topağlarda.mp3"),
+    conceded: encodeURI("assets/golyedim.mp3"),
     save: encodeURI("assets/kalecikurtarış.wav"),
     userSave: encodeURI("assets/kurtarmaben.mp3"),
     crowd: encodeURI("assets/freesound_community-soccer-stadium-10-6709.mp3"),
@@ -326,7 +328,7 @@
   }
 
   function preloadMatchSounds() {
-    ["whistle", "kick", "cheer", "save", "userSave"].forEach((name) => getEffectPlayer(name));
+    ["whistle", "kick", "cheer", "goalNet", "conceded", "save", "userSave"].forEach((name) => getEffectPlayer(name));
     getCrowdPlayer();
   }
 
@@ -916,7 +918,11 @@
     els.football.classList.add("is-flight", `is-flight--${result}`);
     setKeeperAnimation(keeperAim);
     playSound("kick", 0.9);
-    if (result === "goal") playSound("cheer", 0.9);
+    if (result === "goal") {
+      playSound("cheer", 0.9);
+      playSound("goalNet", 0.9);
+      if (!userIsStriker()) playSound("conceded", 0.88);
+    }
     if (result === "save") {
       const saveSound = userIsStriker() ? "save" : "userSave";
       shotSoundTimer = window.setTimeout(() => {
