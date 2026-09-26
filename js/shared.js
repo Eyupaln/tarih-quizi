@@ -338,7 +338,7 @@
     encodeURI("assets/menü2.mp3"),
     encodeURI("assets/menü3.mp3"),
   ];
-  const MENU_MUSIC_VOLUME = 0.7;
+  const MENU_MUSIC_VOLUME = 0.67;
   let menuPlayers = null;
   let menuMusicActive = false;
   let currentMenuTrack = null;
@@ -359,6 +359,12 @@
         if (now - lastMenuPersistAt < 1500) return;
         lastMenuPersistAt = now;
         persistMenuMusicState(trackIndex, player.currentTime);
+      });
+      // Without this the track stops at its end and the same menu song keeps
+      // starting again on the next navigation instead of moving on.
+      player.addEventListener("ended", () => {
+        if (!menuMusicActive || currentMenuTrack !== player) return;
+        playNextMenuTrack();
       });
       player.load();
       return player;
@@ -476,8 +482,16 @@
       && savedState.trackIndex < MENU_TRACK_SOURCES.length
       ? savedState.trackIndex
       : null;
-    const trackIndex = savedIndex ?? takeNextMenuTrackIndex();
-    playMenuTrack(trackIndex, Number(savedState?.position) || 0);
+    const savedPosition = Number(savedState?.position) || 0;
+    // Resuming a few milliseconds before the end would only blip and then
+    // skip, so roll on to the next track instead.
+    const savedPlayer = savedIndex === null ? null : getMenuPlayers()[savedIndex];
+    const nearEnd = Boolean(savedPlayer)
+      && Number.isFinite(savedPlayer.duration)
+      && savedPlayer.duration > 0
+      && savedPosition >= savedPlayer.duration - 1.5;
+    const trackIndex = savedIndex === null || nearEnd ? takeNextMenuTrackIndex() : savedIndex;
+    playMenuTrack(trackIndex, nearEnd ? 0 : savedPosition);
   }
 
   function startMenuMusic() {
