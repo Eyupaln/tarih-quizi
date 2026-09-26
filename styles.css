@@ -3238,6 +3238,17 @@ body.is-loading {
   filter: saturate(0.78);
 }
 
+/* Tournament mode is not built yet: the button stays visible but inert. */
+.mode-button--locked {
+  cursor: default;
+  opacity: 0.55;
+  filter: saturate(0.4);
+}
+
+.mode-button--locked:hover {
+  border-color: inherit;
+}
+
 .mode-button--tournament {
   position: relative;
   padding: 0 10px 0 52px;

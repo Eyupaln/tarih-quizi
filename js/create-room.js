@@ -10,15 +10,9 @@
   let selectedMode = "duo";
 
   function selectMode(mode) {
-    if (mode === "tournament") {
-      // The realtime server only fills rooms to two players, so a three player
-      // tournament would silently play as a normal duel. Say so instead of
-      // creating a room that does not do what it promises.
-      if (errorLabel) {
-        errorLabel.textContent = "3 kişilik turnuva yakında. Şimdilik 1v1 düello oynayabilirsin.";
-      }
-      return;
-    }
+    // The tournament mode is not built yet, so its button stays inert: it
+    // never activates and never creates a room.
+    if (mode === "tournament") return;
     selectedMode = "duo";
     if (errorLabel) errorLabel.textContent = "";
     modeButtons.forEach((button) => {
@@ -52,7 +46,14 @@
     if (!shared.requirePlayerName()) return;
     shared.bindSoundToggle();
     if (playerNameLabel) playerNameLabel.textContent = shared.getPlayerName();
-    modeButtons.forEach((button) => button.addEventListener("click", () => selectMode(button.dataset.mode)));
+    modeButtons.forEach((button) => {
+      if (button.dataset.mode === "tournament") {
+        button.classList.add("mode-button--locked");
+        button.setAttribute("aria-disabled", "true");
+        return;
+      }
+      button.addEventListener("click", () => selectMode(button.dataset.mode));
+    });
     selectMode(selectedMode);
     submitButton?.addEventListener("click", createRoom);
     await shared.playLoading(shared.getInitialLoadingDuration());
