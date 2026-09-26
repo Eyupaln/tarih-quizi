@@ -12,7 +12,7 @@ const port = Number.parseInt(process.env.PORT || "3000", 10) || 3000;
 const ROOM_CODE_PATTERN = /^[2-9A-HJ-NP-Z]{6}$/;
 const ROOM_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const REGULATION_SHOTS = 10;
-const DISCONNECT_GRACE_MS = 10000;
+const DISCONNECT_GRACE_MS = 20000;
 const createRoomCode = customAlphabet(ROOM_ALPHABET, 6);
 
 const app = express();

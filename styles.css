@@ -2839,6 +2839,10 @@ body.is-loading {
   display: grid;
   place-items: center;
   padding: 22px;
+  background: rgba(3, 8, 13, 0.62);
+  backdrop-filter: blur(11px) saturate(0.85);
+  -webkit-backdrop-filter: blur(11px) saturate(0.85);
+  animation: overlayFadeIn 240ms ease-out both;
 }
 
 .opponent-left-card {
@@ -2850,7 +2854,10 @@ body.is-loading {
   text-align: center;
   background: linear-gradient(160deg, #2a1c12, #0b0c10 78%);
   box-shadow: 0 26px 65px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  animation: popIn 260ms cubic-bezier(0.2, 1.15, 0.35, 1) both;
+  /* Entrance first, then a slow breathing loop so the card feels alive. */
+  animation:
+    popIn 260ms cubic-bezier(0.2, 1.15, 0.35, 1) both,
+    cardBreathe 4.6s ease-in-out 320ms infinite;
 }
 
 .opponent-left-icon {
@@ -2863,6 +2870,58 @@ body.is-loading {
   color: var(--orange);
   background: rgba(255, 109, 0, 0.12);
   font-size: 30px;
+  animation: iconBreathe 2.3s ease-in-out infinite;
+}
+
+/* Slow inhale/exhale on the timer so the wait feels like it is counting. */
+.opponent-left-timer {
+  animation: timerBreathe 2.3s ease-in-out infinite;
+}
+
+@keyframes cardBreathe {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 26px 65px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+  50% {
+    transform: scale(1.014);
+    box-shadow: 0 30px 78px rgba(0, 0, 0, 0.6), 0 0 42px rgba(255, 109, 0, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  }
+}
+
+@keyframes iconBreathe {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(255, 109, 0, 0.16);
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow: 0 0 0 10px rgba(255, 109, 0, 0);
+  }
+}
+
+@keyframes timerBreathe {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.82;
+    transform: scale(1.02);
+  }
+}
+
+@keyframes overlayFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .opponent-left-card h2 {
