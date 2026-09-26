@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { Server } from "socket.io";
 import { customAlphabet } from "nanoid";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -67,6 +67,39 @@ function normalizeZone(value) {
   const zone = Number(value);
   if (!Number.isInteger(zone) || zone < 0 || zone > 8) return null;
   return zone;
+}
+
+// Goal geometry, in normalised 0-1 space relative to the goal box (never the
+// viewport, because the two players are on different devices).
+export const GOAL_GRID = 3;
+
+// Adjacent cell centres sit 1/3 apart, so any radius below 0.1667 can only ever
+// match a cell with itself. 0.12 therefore reproduces the old exact-equality
+// behaviour. This is the difficulty dial: ~0.40 makes the keeper save about
+// half of all shots.
+export const DIVE_RADIUS = 0.12;
+
+// Centre of a 3x3 goal cell, as { x, y } in 0-1 goal space.
+export function cellCenter(zone) {
+  const index = Number(zone);
+  if (!Number.isInteger(index) || index < 0 || index >= GOAL_GRID * GOAL_GRID) return null;
+  const column = index % GOAL_GRID;
+  const row = Math.floor(index / GOAL_GRID);
+  const step = 1 / GOAL_GRID;
+  return { x: (column + 0.5) * step, y: (row + 0.5) * step };
+}
+
+// Euclidean distance between two goal-space points.
+export function goalDistance(a, b) {
+  if (!a || !b) return Infinity;
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+// True when the keeper's reach covers the striker's shot.
+export function isSaved(forvetTarget, kaleciTarget, radius = DIVE_RADIUS) {
+  return goalDistance(forvetTarget, kaleciTarget) <= radius;
 }
 
 function createMatch() {
@@ -350,7 +383,9 @@ function resolveRound(room) {
   const kaleci = room.players.find((player) => player.id === roles?.kaleciId);
   if (!forvet || !kaleci) return null;
 
-  const result = forvetZone === kaleciZone ? "KURTARDI" : "GOL";
+  const forvetTarget = cellCenter(forvetZone);
+  const kaleciTarget = cellCenter(kaleciZone);
+  const result = isSaved(forvetTarget, kaleciTarget) ? "KURTARDI" : "GOL";
   if (result === "GOL") room.match.score[getScoreKey(room, forvet.id)] += 1;
   room.match.shots.forvet.push({ round: room.match.round, zone: forvetZone, result });
   room.match.shots.kaleci.push({ round: room.match.round, zone: kaleciZone, result });
@@ -650,10 +685,16 @@ io.on("connection", (socket) => {
   });
 });
 
-httpServer.listen(port, "0.0.0.0", () => {
-  console.log(`Server listening on port ${port}`);
-});
+// Only bind a port when this file is the process entrypoint. Importing it
+// (for the pure goal geometry helpers) must not start a server.
+const isEntrypoint = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
-process.on("SIGTERM", () => {
-  httpServer.close(() => process.exit(0));
-});
+if (isEntrypoint) {
+  httpServer.listen(port, "0.0.0.0", () => {
+    console.log(`Server listening on port ${port}`);
+  });
+
+  process.on("SIGTERM", () => {
+    httpServer.close(() => process.exit(0));
+  });
+}
