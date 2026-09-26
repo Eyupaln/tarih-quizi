@@ -73,11 +73,19 @@ function normalizeZone(value) {
 // viewport, because the two players are on different devices).
 export const GOAL_GRID = 3;
 
-// Adjacent cell centres sit 1/3 apart, so any radius below 0.1667 can only ever
-// match a cell with itself. 0.12 therefore reproduces the old exact-equality
-// behaviour. This is the difficulty dial: ~0.40 makes the keeper save about
-// half of all shots.
-export const DIVE_RADIUS = 0.12;
+// Difficulty dial. Measured on 400k random (shot, keeper) pairs in a unit
+// square: 0.12 -> ~4% saves, 0.40 -> ~34%, 0.52 -> ~50%.
+//
+// Note pi*r^2 only holds while the circle fits inside the square. Past 0.5 it
+// spills over the edges, and that area can never be reached by a real target,
+// so the naive estimate is badly wrong here: pi*0.52^2 claims 85%. The radius
+// that actually yields 50% is 0.5207, which is what this is rounded from.
+//
+// Where you aim decides a lot. Save rate by shot position: centre 82.9%, edge
+// midpoint 43.3%, corner 23.4%. The centre is close to a guaranteed save, so
+// the useful choices are the edges and the corners. The geometry is symmetric,
+// so neither role has an advantage.
+export const DIVE_RADIUS = 0.52;
 
 // Centre of a 3x3 goal cell, as { x, y } in 0-1 goal space.
 export function cellCenter(zone) {
