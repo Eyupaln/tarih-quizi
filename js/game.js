@@ -955,12 +955,13 @@
     const elapsed = Math.floor((Date.now() - match.startedAt) / 1000);
     const remaining = Math.max(0, 10 - elapsed);
     if (els.roleTimer) els.roleTimer.textContent = `00:${String(remaining).padStart(2, "0")}`;
-    if (remaining > 0) return;
-    els.roleTimer?.classList.add("is-time-warning");
-    // Stop the countdown so the auto pick only fires once.
-    if (roundTimer) window.clearInterval(roundTimer);
-    roundTimer = null;
-    if (state.realtime) autoPickExpiredTurn();
+    // The countdown is only a pressure indicator. It never picks for the
+    // player, so a slow turn simply keeps waiting.
+    if (remaining === 0) {
+      els.roleTimer?.classList.add("is-time-warning");
+      if (roundTimer) window.clearInterval(roundTimer);
+      roundTimer = null;
+    }
   }
 
   function pulseScore(element) {
@@ -1476,17 +1477,6 @@
       els.opponentLeftWaitButton.innerHTML = `DEVAM ET ${materialIcon("arrow_forward")}`;
     }
     els.opponentLeftOverlay.hidden = false;
-  }
-
-  // ---- turn timer: pick automatically so a round can never hang ----
-  function autoPickExpiredTurn() {
-    const match = state.match;
-    if (!match || match.phase !== "aim" || match.userConfirmed) return;
-    const zone = Math.floor(Math.random() * 9);
-    match.userAim = { type: "goal", cell: zone };
-    setAim(match.userAim);
-    showToast("Süre doldu, hedef otomatik seçildi.", "orange");
-    confirmRealtimeUserAction();
   }
 
   function exitRealtime() {
