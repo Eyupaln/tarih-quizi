@@ -6,6 +6,7 @@
   const materialIcon = (name, className = "") => `<span class="material-symbols-rounded ${className}" aria-hidden="true">${name}</span>`;
 
   const els = {
+    loadingScreen: $("#loadingScreen"),
     appShell: $("#appShell"),
     lobbyView: $("#lobbyView"),
     matchView: $("#matchView"),
@@ -32,22 +33,31 @@
     leaveMatchButton: $("#leaveMatchButton"),
     youAvatar: $("#youAvatar"),
     youName: $("#youName"),
+    youScore: $("#youScore"),
     opponentAvatar: $("#opponentAvatar"),
     opponentName: $("#opponentName"),
+    opponentScore: $("#opponentScore"),
     opponentRoleLabel: $("#opponentRoleLabel"),
+    matchScoreboard: $("#matchScoreboard"),
     scoreText: $("#scoreText"),
     scoreStatus: $("#scoreStatus"),
+    scoreFeedback: $("#scoreFeedback"),
     roundEyebrow: $("#roundEyebrow"),
+    roundCurrent: $("#roundCurrent"),
+    roundTotal: $("#roundTotal"),
     roundLabel: $("#roundLabel"),
     youAttemptDots: $("#youAttemptDots"),
     opponentAttemptDots: $("#opponentAttemptDots"),
+    youAttemptCount: $("#youAttemptCount"),
+    opponentAttemptCount: $("#opponentAttemptCount"),
     roleBanner: $("#roleBanner"),
     roleBannerIcon: $("#roleBannerIcon"),
     roleTitle: $("#roleTitle"),
     roleTimer: $("#roleTimer"),
     pitch: $("#pitch"),
     goalFrame: $("#goalFrame"),
-    targetGrid: $("#targetGrid"),
+    aimSurface: $("#aimSurface"),
+    aimMarker: $("#aimMarker"),
     keeper: $("#keeper"),
     trajectory: $("#trajectory"),
     trajectoryPath: $("#trajectoryPath"),
@@ -60,9 +70,6 @@
     opponentStatusAvatar: $("#opponentStatusAvatar"),
     opponentStatusText: $("#opponentStatusText"),
     statusPulse: $("#statusPulse"),
-    opponentActionButton: $("#opponentActionButton"),
-    opponentTargetGrid: $("#opponentTargetGrid"),
-    opponentTargetLabel: $("#opponentTargetLabel"),
     instructionIcon: $("#instructionIcon"),
     actionTitle: $("#actionTitle"),
     actionSubtitle: $("#actionSubtitle"),
@@ -98,7 +105,49 @@
     rulesSheet: $("#rulesSheet"),
     rulesBackdrop: $("#rulesBackdrop"),
     closeRulesButton: $("#closeRulesButton"),
+    exitConfirmOverlay: $("#exitConfirmOverlay"),
+    opponentLeftOverlay: $("#opponentLeftOverlay"),
+    opponentLeftIcon: $("#opponentLeftIcon"),
+    opponentLeftEyebrow: $("#opponentLeftEyebrow"),
+    opponentLeftTitle: $("#opponentLeftTitle"),
+    opponentLeftMessage: $("#opponentLeftMessage"),
+    opponentLeftTimer: $("#opponentLeftTimer"),
+    opponentLeftCountdown: $("#opponentLeftCountdown"),
+    opponentLeftScore: $("#opponentLeftScore"),
+    opponentLeftYouScore: $("#opponentLeftYouScore"),
+    opponentLeftRivalScore: $("#opponentLeftRivalScore"),
+    opponentLeftWaitButton: $("#opponentLeftWaitButton"),
+    opponentLeftLobbyButton: $("#opponentLeftLobbyButton"),
+    exitConfirmBackdrop: $("#exitConfirmBackdrop"),
+    exitConfirmCancel: $("#exitConfirmCancel"),
+    exitConfirmConfirm: $("#exitConfirmConfirm"),
   };
+
+  const loadingVisitKey = "penalti-duello-loading-seen";
+  let hasVisitedSite = false;
+
+  try {
+    hasVisitedSite = sessionStorage.getItem(loadingVisitKey) === "true";
+    sessionStorage.setItem(loadingVisitKey, "true");
+  } catch {
+    // Keep the first-load timing if session storage is unavailable.
+  }
+
+  document.body.classList.add("is-loading");
+  const isReload = window.performance?.getEntriesByType?.("navigation")?.[0]?.type === "reload";
+  const loadingDuration = hasVisitedSite || isReload ? 1100 : 1200;
+
+  if (els.loadingScreen) {
+    els.loadingScreen.dataset.duration = String(loadingDuration);
+    window.setTimeout(() => {
+      els.loadingScreen.classList.add("is-hidden");
+      els.loadingScreen.setAttribute("aria-busy", "false");
+      els.loadingScreen.setAttribute("aria-hidden", "true");
+      document.body.classList.remove("is-loading");
+    }, loadingDuration);
+  } else {
+    document.body.classList.remove("is-loading");
+  }
 
   const BOT_POOL = {
     duo: [
@@ -120,14 +169,31 @@
     match: null,
     tournament: null,
     resultAction: null,
-    sound: true,
+    sound: window.PenaltiShared?.getSoundEnabled?.() ?? true,
+    realtime: false,
   };
 
   let toastTimer = null;
   let roundTimer = null;
   let countdownTimers = [];
   let resolveTimer = null;
+  let scoreFeedbackTimer = null;
+  let shotSoundTimer = null;
   let audioContext = null;
+
+  const SOUND_SOURCES = {
+    whistle: encodeURI("assets/düdük.mp3"),
+    kick: encodeURI("assets/kick.mp3"),
+    cheer: encodeURI("assets/stadium-goal-cheer.mp3"),
+    goalNet: encodeURI("assets/topağlarda.mp3"),
+    conceded: encodeURI("assets/golyedim.mp3"),
+    save: encodeURI("assets/kalecikurtarış.wav"),
+    userSave: encodeURI("assets/kurtarmaben.mp3"),
+    crowd: encodeURI("assets/freesound_community-soccer-stadium-10-6709.mp3"),
+  };
+  const effectPlayers = new Map();
+  let crowdPlayer = null;
+  let crowdRequested = false;
 
   const playerYou = () => ({ id: "you", name: "SEN", avatar: "sports_soccer", ready: false, bot: false });
 
@@ -163,16 +229,27 @@
   function clearMatchTimers() {
     if (roundTimer) window.clearInterval(roundTimer);
     if (resolveTimer) window.clearTimeout(resolveTimer);
+    if (scoreFeedbackTimer) window.clearTimeout(scoreFeedbackTimer);
+    if (shotSoundTimer) window.clearTimeout(shotSoundTimer);
     countdownTimers.forEach((timer) => window.clearTimeout(timer));
     roundTimer = null;
     resolveTimer = null;
+    scoreFeedbackTimer = null;
+    shotSoundTimer = null;
     countdownTimers = [];
+    if (els.scoreFeedback) {
+      els.scoreFeedback.classList.remove("is-visible", "score-feedback--goal", "score-feedback--save", "score-feedback--miss", "score-feedback--conceded");
+      els.scoreFeedback.textContent = "";
+    }
+    [els.youScore, els.opponentScore].forEach((score) => score?.classList.remove("score-pop"));
+    if (els.matchScoreboard) els.matchScoreboard.classList.remove("is-goal", "is-save", "is-miss", "is-conceded");
   }
 
   function hideOverlays() {
     els.countdownOverlay.hidden = true;
     els.resultOverlay.hidden = true;
     els.rulesSheet.hidden = true;
+    if (els.exitConfirmOverlay) els.exitConfirmOverlay.hidden = true;
   }
 
   function showToast(message, tone = "green") {
@@ -202,6 +279,73 @@
     } catch {
       // Audio is an enhancement; browsers may block it until a gesture.
     }
+  }
+
+  function getEffectPlayer(name) {
+    const source = SOUND_SOURCES[name];
+    if (!source) return null;
+    if (!effectPlayers.has(name)) {
+      const player = new Audio(source);
+      player.preload = "auto";
+      effectPlayers.set(name, player);
+      player.load();
+    }
+    return effectPlayers.get(name);
+  }
+
+  function playSound(name, volume = 0.85) {
+    if (!state.sound) return;
+    const player = getEffectPlayer(name);
+    if (!player) return;
+    player.pause();
+    try {
+      player.currentTime = 0;
+    } catch {
+      // Some browsers reject seeking before the media is ready.
+    }
+    player.volume = Math.max(0, Math.min(1, volume));
+    const playRequest = player.play();
+    if (playRequest) playRequest.catch(() => {});
+  }
+
+  function getCrowdPlayer() {
+    if (crowdPlayer) return crowdPlayer;
+    const player = new Audio(SOUND_SOURCES.crowd);
+    player.preload = "auto";
+    player.loop = true;
+    player.volume = 0.18;
+    crowdPlayer = player;
+    player.load();
+    return crowdPlayer;
+  }
+
+  function startCrowdAmbience() {
+    crowdRequested = true;
+    if (!state.sound) return;
+    const player = getCrowdPlayer();
+    if (!player.paused) return;
+    const playRequest = player.play();
+    if (playRequest) playRequest.catch(() => {});
+  }
+
+  function stopCrowdAmbience() {
+    crowdRequested = false;
+    if (!crowdPlayer) return;
+    crowdPlayer.pause();
+    try {
+      crowdPlayer.currentTime = 0;
+    } catch {
+      // The media may not be seekable until it finishes buffering.
+    }
+  }
+
+  function resumeCrowdAmbience() {
+    if (crowdRequested && state.sound) startCrowdAmbience();
+  }
+
+  function preloadMatchSounds() {
+    ["whistle", "kick", "cheer", "goalNet", "conceded", "save", "userSave"].forEach((name) => getEffectPlayer(name));
+    getCrowdPlayer();
   }
 
   function setMode(mode) {
@@ -337,6 +481,389 @@
     }
   }
 
+  let realtimeBound = false;
+  let realtimeMatchActive = false;
+  let realtimeFinishedShown = false;
+
+  function normalizeRealtimeResult(result) {
+    if (result === "GOL") return "goal";
+    if (result === "KURTARDI") return "save";
+    if (result === "KACIRDI" || result === "MISS") return "miss";
+    return "goal";
+  }
+
+  function buildRealtimeMatchState(room, payload = {}) {
+    const rawPlayers = payload.players?.length ? payload.players : room?.players || [];
+    const playerToken = window.PenaltiShared?.getPlayerToken?.() || "you";
+    const youIndex = Math.max(0, rawPlayers.findIndex((player) => player.id === playerToken));
+    const orderedPlayers = rawPlayers.length ? rawPlayers : [
+      { id: playerToken, nickname: "SEN" },
+      { id: "opponent", nickname: "RAKİP" },
+    ];
+    const youRaw = orderedPlayers[youIndex] || orderedPlayers[0];
+    const opponentRaw = orderedPlayers[youIndex === 0 ? 1 : 0] || { id: "opponent", nickname: "RAKİP" };
+    const toLocalPlayer = (player, isYou) => ({
+      ...player,
+      name: player.nickname || (isYou ? "SEN" : "RAKİP"),
+      nickname: player.nickname || (isYou ? "SEN" : "RAKİP"),
+      avatar: isYou ? "sports_soccer" : "person",
+      bot: false,
+    });
+    const you = toLocalPlayer(youRaw, true);
+    const opponent = toLocalPlayer(opponentRaw, false);
+    const round = Number(payload.round ?? room?.match?.round) || 1;
+    const forvetId = payload.forvetId || orderedPlayers[round % 2 === 1 ? 0 : 1]?.id;
+    const kaleciId = payload.kaleciId || orderedPlayers[round % 2 === 1 ? 1 : 0]?.id;
+    const sourceScore = room?.match?.score || {};
+    const score = [Number(sourceScore.player1) || 0, Number(sourceScore.player2) || 0];
+    if (youIndex === 1) score.reverse();
+    const attempts = [[], []];
+    const saves = [0, 0];
+    const shots = room?.match?.shots || { forvet: [], kaleci: [] };
+    shots.forvet.forEach((shot) => {
+      const serverForvetIndex = shot.round % 2 === 1 ? 0 : 1;
+      const localForvetIndex = serverForvetIndex === youIndex ? 0 : 1;
+      const result = normalizeRealtimeResult(shot.result);
+      attempts[localForvetIndex].push(result);
+      attempts[localForvetIndex === 0 ? 1 : 0].push(result);
+      if (result === "save") saves[localForvetIndex === 0 ? 1 : 0] += 1;
+    });
+
+    return {
+      players: [you, opponent],
+      score,
+      attempts,
+      saves,
+      round,
+      suddenDeath: Boolean(payload.goldenPenalty ?? room?.match?.goldenPenalty),
+      youRole: forvetId === you.id ? "forvet" : "kaleci",
+      opponentRole: kaleciId === opponent.id ? "kaleci" : "forvet",
+    };
+  }
+
+  function applyRealtimeRoom(room) {
+    if (!room) return;
+    state.room = true;
+    state.roomCode = room.code || state.roomCode;
+    state.players = room.players || [];
+    window.PenaltiShared?.setRoomSnapshot?.(room, room.code);
+  }
+
+  function bindRealtimeEvents() {
+    if (realtimeBound) return;
+    realtimeBound = true;
+    const shared = window.PenaltiShared;
+    shared.onSocket("match:started", (payload) => {
+      if (state.realtime && !realtimeMatchActive) startRealtimeMatch(payload);
+    });
+    shared.onSocket("round:result", (payload) => {
+      if (state.realtime) handleRealtimeRoundResult(payload);
+    });
+    shared.onSocket("shot:waiting", (payload) => {
+      if (!state.match || !state.realtime) return;
+      if (payload?.role === state.match.youRole) state.match.userConfirmed = true;
+      else state.match.botConfirmed = true;
+      renderMatch();
+    });
+    shared.onSocket("round:ready", (payload) => {
+      if (state.realtime) handleRealtimeRoundReady(payload);
+    });
+    shared.onSocket("match:finished", (payload) => {
+      if (!state.realtime) return;
+      state.realtimeFinished = payload;
+      if (!state.match || state.match.phase === "aim" || state.match.phase === "waiting-next") {
+        showRealtimeFinished(payload);
+      }
+    });
+    // opponent:disconnected is intentionally not handled here: opponent:left
+    // fires right after it and drives the full screen card.
+    shared.onSocket("room:playerReconnected", (payload) => {
+      if (!state.realtime) return;
+      if (payload?.room) applyRealtimeRoom(payload.room);
+      if (state.match?.phase === "waiting-opponent") {
+        state.match.phase = "aim";
+        els.opponentStatusText.textContent = "Rakip yeniden bağlandı.";
+        renderMatch();
+      }
+      // They made it back before the grace period ran out: carry on.
+      closeOpponentLeftCard();
+      showToast("Rakip yeniden bağlandı.", "green");
+    });
+    shared.onSocket("opponent:left", (payload) => {
+      if (!state.realtime) return;
+      if (state.match && state.match.phase !== "finished") state.match.phase = "waiting-opponent";
+      showOpponentLeftCard(payload);
+    });
+    shared.onSocket("room:playerLeft", (payload) => {
+      if (!state.realtime) return;
+      showOpponentLeftCard({ ...payload, canReconnect: false, graceMs: 0 });
+    });
+    shared.onSocket("room:error", (payload) => {
+      if (payload?.message) showToast(payload.message, "orange");
+    });
+    shared.onSocket("connect_error", () => showToast("Sunucuya bağlanılamadı.", "orange"));
+    shared.onSocket("connect", () => {
+      // A dropped socket (screen lock, app backgrounded, network blip) is
+      // replaced by a brand-new socket id the server does not know, so the
+      // client silently stops receiving room events. Re-join to recover.
+      if (!state.realtime || !state.roomCode || !realtimeMatchActive) return;
+      window.setTimeout(() => rejoinRealtimeRoom(), 200);
+    });
+  }
+
+  function startRealtimeMatch(payload = {}) {
+    if (realtimeMatchActive) return;
+    const room = payload.room;
+    if (!room) return;
+    realtimeMatchActive = true;
+    realtimeFinishedShown = false;
+    state.realtime = true;
+    state.mode = "duo";
+    applyRealtimeRoom(room);
+    clearMatchTimers();
+    hideOverlays();
+    const nextState = buildRealtimeMatchState(room, payload);
+    state.match = {
+      ...nextState,
+      phase: "aim",
+      userAim: null,
+      botAim: null,
+      userConfirmed: false,
+      botConfirmed: false,
+      startedAt: Date.now(),
+      tournamentIndex: null,
+      tournamentRecorded: false,
+      lastResult: null,
+    };
+    state.realtimeFinished = null;
+    els.matchRoomLabel.textContent = `ODA · ${room.code || "----"}`;
+    setView("match");
+    window.PenaltiShared?.stopMenuMusic?.();
+    startCrowdAmbience();
+    beginRound();
+  }
+
+  function updateRealtimeRound(payload = {}) {
+    const room = payload.room;
+    if (!room || !state.match) return;
+    applyRealtimeRoom(room);
+    const nextState = buildRealtimeMatchState(room, payload);
+    state.match.players = nextState.players;
+    state.match.score = nextState.score;
+    state.match.attempts = nextState.attempts;
+    state.match.saves = nextState.saves;
+    state.match.round = nextState.round;
+    state.match.suddenDeath = nextState.suddenDeath;
+    state.match.youRole = nextState.youRole;
+    state.match.opponentRole = nextState.opponentRole;
+  }
+
+  function handleRealtimeRoundReady(payload) {
+    if (!state.match) return;
+    const nextRound = Number(payload?.round);
+    const alreadyReady = state.match.phase === "aim" && nextRound === state.match.round;
+    updateRealtimeRound(payload);
+    if (alreadyReady) {
+      // Duplicate round:ready (both players pressed the result button).
+      // The round is already running, so just refresh the view.
+      renderMatch();
+      return;
+    }
+    state.match.phase = "aim";
+    beginRound();
+  }
+
+  function handleRealtimeRoundResult(payload) {
+    const match = state.match;
+    if (!match || match.phase === "resolving" || match.phase === "result") return;
+    updateRealtimeRound(payload);
+    match.suddenDeath = Boolean(payload.goldenPenalty && payload.round > 10);
+    const forvetZone = Number(payload.forvetZone);
+    const kaleciZone = Number(payload.kaleciZone);
+    if (!Number.isInteger(forvetZone) || !Number.isInteger(kaleciZone)) return;
+    const forvetIsYou = match.youRole === "forvet";
+    match.userAim = { type: "goal", cell: forvetIsYou ? forvetZone : kaleciZone };
+    match.botAim = { type: "goal", cell: forvetIsYou ? kaleciZone : forvetZone };
+    match.phase = "resolving";
+    const result = normalizeRealtimeResult(payload.result);
+    const shot = { type: "goal", cell: forvetZone };
+    const keeperAim = { type: "goal", cell: kaleciZone };
+    els.opponentStatusText.textContent = "Vuruş sonucu açıklanıyor…";
+    playSound("whistle", 0.8);
+    resolveTimer = window.setTimeout(() => {
+      if (state.match !== match) return;
+      animateShot(shot, keeperAim, result);
+      resolveTimer = window.setTimeout(() => {
+        if (state.match !== match) return;
+        match.phase = "result";
+        const strikerIndex = forvetIsYou ? 0 : 1;
+        renderMatch();
+        showScoreFeedback(result);
+        showShotResult(result, strikerIndex, strikerIndex === 0 ? 1 : 0);
+        if (payload.matchOver && !state.realtimeFinished) state.realtimeFinished = payload;
+        if (payload.goldenPenalty && payload.nextRound === 11) state.resultAction = "start-sudden";
+        else if (payload.matchOver) state.resultAction = "match-finish";
+        else state.resultAction = "next-round";
+        els.resultPrimaryButton.innerHTML = `${payload.matchOver ? "SONUÇLARI GÖR" : payload.goldenPenalty && payload.nextRound === 11 ? "ALTIN PENALTI" : "SONRAKİ VURUŞ"} ${materialIcon("arrow_forward")}`;
+      }, 620);
+    }, 320);
+  }
+
+  function showRealtimeFinished(payload = {}) {
+    if (!state.match || realtimeFinishedShown) return;
+    realtimeFinishedShown = true;
+    const match = state.match;
+    clearMatchTimers();
+    stopCrowdAmbience();
+    closeOpponentLeftCard();
+    updateRealtimeRound(payload);
+    match.phase = "finished";
+    hideOverlays();
+    const userToken = window.PenaltiShared?.getPlayerToken?.();
+    const userWon = payload.winnerId ? payload.winnerId === userToken : match.score[0] > match.score[1];
+    const tied = match.score[0] === match.score[1];
+    const disconnected = payload.reason === "opponent_disconnected";
+    state.resultAction = "realtime-finish";
+    els.resultCard.className = "result-card";
+    els.resultIcon.innerHTML = materialIcon(disconnected ? "person_off" : userWon ? "emoji_events" : tied ? "handshake" : "sports_soccer");
+    els.resultEyebrow.textContent = disconnected ? "RAKİP AYRILDI" : "MAÇ SONU";
+    els.resultTitle.textContent = disconnected ? "MAÇ SONLANDI" : userWon ? "KAZANDIN!" : tied ? "DÜELLO BERABERE!" : "KAYBETTİN";
+    els.resultMessage.textContent = disconnected ? "Rakibin bağlantısı koptu." : userWon ? "Rakibini yendin." : "Bu maç için tekrar dene.";
+    els.resultScore.textContent = `SEN ${match.score[0]} – ${match.score[1]} RAKİP`;
+    els.resultStats.innerHTML = resultStatsMarkup(match);
+    els.resultPrimaryButton.innerHTML = `LOBİYE DÖN ${materialIcon("arrow_forward")}`;
+    els.resultSecondaryButton.textContent = "ANA MENÜ";
+    renderConfetti(userWon);
+    els.resultOverlay.hidden = false;
+  }
+
+  function handleRealtimeResultPrimary() {
+    // The final screen is already open, so this button means "leave".
+    // Calling showRealtimeFinished again would be a no-op and the player
+    // would be stuck on the result screen.
+    if (realtimeFinishedShown) {
+      exitRealtime();
+      return;
+    }
+    if (state.resultAction === "match-finish" || state.realtimeFinished) {
+      showRealtimeFinished(state.realtimeFinished || {});
+      return;
+    }
+    if (!["next-round", "start-sudden", "next-sudden"].includes(state.resultAction)) return;
+    const previousPhase = state.match?.phase;
+    els.resultOverlay.hidden = true;
+    if (state.match) state.match.phase = "waiting-next";
+    els.opponentStatusText.textContent = "Yeni tur bekleniyor…";
+    window.PenaltiShared.emitWithAck("match:next").then((response) => {
+      if (response?.ok) return;
+      // Server refused: restore the result screen so the player is never stuck.
+      if (state.match && state.match.phase === "waiting-next") {
+        state.match.phase = previousPhase || "result";
+        els.resultOverlay.hidden = false;
+        renderMatch();
+      }
+      if (response?.error?.message) showToast(response.error.message, "orange");
+    }).catch((error) => {
+      if (state.match && state.match.phase === "waiting-next") {
+        state.match.phase = previousPhase || "result";
+        els.resultOverlay.hidden = false;
+        renderMatch();
+      }
+      if (error?.message) showToast(error.message, "orange");
+    });
+  }
+
+  async function confirmRealtimeUserAction() {
+    const match = state.match;
+    if (!match || match.phase !== "aim" || match.userConfirmed) return;
+    const x = Number(match.userAim?.x);
+    const y = Number(match.userAim?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      showToast("Önce hedef bölge seç.", "orange");
+      return;
+    }
+    match.userConfirmed = true;
+    renderMatch();
+    const eventName = match.youRole === "forvet" ? "shot:submit" : "save:submit";
+    try {
+      const response = await window.PenaltiShared.emitWithAck(eventName, { x, y });
+      if (!response?.ok) throw new Error(response?.error?.message || "Seçimin gönderilemedi.");
+    } catch (error) {
+      match.userConfirmed = false;
+      renderMatch();
+      showToast(error.message || "Seçimin gönderilemedi.", "orange");
+    }
+  }
+
+  async function rejoinRealtimeRoom() {
+    const shared = window.PenaltiShared;
+    if (!state.realtime || !state.roomCode) return null;
+    try {
+      const response = await shared.emitWithAck("room:rejoin", {
+        code: state.roomCode,
+        nickname: shared.getPlayerName(),
+        playerToken: shared.getPlayerToken(),
+      });
+      if (!response?.ok) return null;
+      if (response.room) applyRealtimeRoom(response.room);
+      // Unfreeze the local round so input works again after a reconnect.
+      if (state.match && state.match.phase !== "finished") {
+        if (state.match.phase === "waiting-opponent") {
+          state.match.phase = "aim";
+          els.opponentStatusText.textContent = userIsStriker() ? "Rakip kaleyi savunuyor…" : "Rakip şutunu hazırlıyor…";
+        }
+        if (state.match.phase === "waiting-next") state.match.phase = "result";
+        renderMatch();
+      }
+      return response;
+    } catch {
+      return null;
+    }
+  }
+
+  async function launchRealtime(roomCode) {
+    state.realtime = true;
+    state.mode = "duo";
+    state.room = true;
+    state.roomCode = roomCode;
+    bindRealtimeEvents();
+    const shared = window.PenaltiShared;
+    try {
+      const response = await shared.emitWithAck("room:rejoin", {
+        code: roomCode,
+        nickname: shared.getPlayerName(),
+        playerToken: shared.getPlayerToken(),
+      });
+      if (!response?.ok) throw new Error(response?.error?.message || "Oda bulunamadı.");
+      if (response.started || response.room?.status === "in_progress") startRealtimeMatch(response);
+      else window.location.replace("lobby.html");
+    } catch (error) {
+      showToast(error.message || "Odaya yeniden bağlanılamadı.", "orange");
+      window.setTimeout(() => window.location.replace("lobby.html"), 1200);
+    }
+  }
+
+  function launchFromRoom(roomCode, mode = "duo") {
+    if (window.PenaltiShared?.socket) {
+      launchRealtime(roomCode);
+      return;
+    }
+    setMode(mode === "tournament" ? "tournament" : "duo");
+    setupDemoRoom(roomCode);
+    const you = state.players.find((player) => player.id === "you");
+    if (you) {
+      you.ready = true;
+      if (window.PenaltiShared?.getPlayerName) you.name = window.PenaltiShared.getPlayerName();
+    }
+    renderLobby();
+    startRoom();
+  }
+
+  window.PenaltiGame = {
+    launchFromRoom,
+    getState: () => state,
+  };
+
   function quickDemo() {
     setupDemoRoom();
     const you = state.players.find((player) => player.id === "you");
@@ -389,12 +916,18 @@
       tournamentRecorded: false,
       lastResult: null,
     };
+    els.youScore.textContent = "0";
+    els.opponentScore.textContent = "0";
+    els.scoreText.textContent = "0 – 0";
     els.matchRoomLabel.textContent = `ODA · ${state.roomCode || "DEMO"}`;
     setView("match");
+    window.PenaltiShared?.stopMenuMusic?.();
+    startCrowdAmbience();
     beginRound();
   }
 
   function userIsStriker() {
+    if (state.match?.youRole) return state.match.youRole === "forvet";
     return Boolean(state.match && state.match.round % 2 === 1);
   }
 
@@ -407,6 +940,8 @@
     match.userConfirmed = false;
     match.botConfirmed = false;
     match.startedAt = Date.now();
+    closeOpponentLeftCard();
+    els.roleTimer?.classList.remove("is-time-warning");
     resetPitchVisuals();
     renderMatch();
     const status = userIsStriker() ? "Rakip kaleyi savunuyor…" : "Rakip şutunu hazırlıyor…";
@@ -419,13 +954,52 @@
   function updateRoundTimer() {
     const match = state.match;
     if (!match || match.phase === "result" || match.phase === "resolving" || match.phase === "finished") {
-      els.roleTimer.textContent = "—";
+      if (els.roleTimer) els.roleTimer.textContent = "—";
       return;
     }
     const elapsed = Math.floor((Date.now() - match.startedAt) / 1000);
     const remaining = Math.max(0, 10 - elapsed);
-    els.roleTimer.textContent = `00:${String(remaining).padStart(2, "0")}`;
-    if (remaining === 0) els.roleTimer.classList.add("is-time-warning");
+    if (els.roleTimer) els.roleTimer.textContent = `00:${String(remaining).padStart(2, "0")}`;
+    // The countdown is only a pressure indicator. It never picks for the
+    // player, so a slow turn simply keeps waiting.
+    if (remaining === 0) {
+      els.roleTimer?.classList.add("is-time-warning");
+      if (roundTimer) window.clearInterval(roundTimer);
+      roundTimer = null;
+    }
+  }
+
+  function pulseScore(element) {
+    if (!element) return;
+    element.classList.remove("score-pop");
+    void element.offsetWidth;
+    element.classList.add("score-pop");
+  }
+
+  function showScoreFeedback(result) {
+    if (!els.scoreFeedback) return;
+    const userScored = result === "goal" && userIsStriker();
+    const userConceded = result === "goal" && !userIsStriker();
+    const userSaved = result === "save" && !userIsStriker();
+    const tone = result === "goal" ? (userConceded ? "conceded" : "goal") : result;
+    const labels = {
+      goal: userScored ? "GOL!" : "GOL YEDİN+!",
+      save: userSaved ? "KURTARDIN!" : "KURTARDI!",
+      miss: "KAÇIRDI!",
+    };
+    window.clearTimeout(scoreFeedbackTimer);
+    els.scoreFeedback.textContent = labels[result] || "";
+    els.scoreFeedback.classList.remove("is-visible", "score-feedback--goal", "score-feedback--save", "score-feedback--miss", "score-feedback--conceded");
+    els.scoreFeedback.classList.add("is-visible", `score-feedback--${tone}`);
+    if (els.matchScoreboard) {
+      els.matchScoreboard.classList.remove("is-goal", "is-save", "is-miss", "is-conceded");
+      els.matchScoreboard.classList.add(`is-${tone}`);
+    }
+    scoreFeedbackTimer = window.setTimeout(() => {
+      els.scoreFeedback.classList.remove("is-visible");
+      if (els.matchScoreboard) els.matchScoreboard.classList.remove("is-goal", "is-save", "is-miss", "is-conceded");
+      scoreFeedbackTimer = null;
+    }, 950);
   }
 
   function renderMatch() {
@@ -434,21 +1008,32 @@
     const [you, opponent] = match.players;
     const striker = userIsStriker();
     const regularRound = Math.min(5, ((match.round - 1) % 5) + 1);
-    const attemptText = match.suddenDeath ? `ALTIN ${Math.floor((match.round - 10 + 1) / 2)}` : `${regularRound} / 5`;
+    const currentAttempt = match.suddenDeath ? Math.floor((match.round - 10 + 1) / 2) : regularRound;
+    const totalLabel = match.suddenDeath ? "ALTIN" : "/ 5";
+    const attemptText = match.suddenDeath ? `ALTIN ${currentAttempt}` : `${currentAttempt} / 5`;
+    const previousYouScore = els.youScore.textContent.trim();
+    const previousOpponentScore = els.opponentScore.textContent.trim();
 
     els.youAvatar.innerHTML = materialIcon(you.avatar);
     els.youName.textContent = you.name;
     els.opponentAvatar.innerHTML = materialIcon(opponent.avatar);
     els.opponentName.textContent = opponent.name;
+    els.youScore.textContent = String(match.score[0]);
+    els.opponentScore.textContent = String(match.score[1]);
+    if (previousYouScore && previousYouScore !== els.youScore.textContent) pulseScore(els.youScore);
+    if (previousOpponentScore && previousOpponentScore !== els.opponentScore.textContent) pulseScore(els.opponentScore);
     els.scoreText.textContent = `${match.score[0]} – ${match.score[1]}`;
     els.scoreStatus.textContent = match.suddenDeath ? "ALTIN PENALTI" : "MAÇ";
     els.roundEyebrow.textContent = match.suddenDeath ? "ALTIN VURUŞ" : "VURUŞ";
+    els.roundCurrent.textContent = String(currentAttempt);
+    els.roundTotal.textContent = totalLabel;
     els.roundLabel.textContent = attemptText;
-    els.roleBanner.classList.toggle("role-banner--keeper", !striker);
-    els.roleBannerIcon.innerHTML = materialIcon(striker ? "sports_soccer" : "sports_handball");
-    els.roleTitle.textContent = striker ? "FORVET" : "KALECİ";
+    if (els.roleBanner) els.roleBanner.classList.toggle("role-banner--keeper", !striker);
+    if (els.roleBannerIcon) els.roleBannerIcon.innerHTML = materialIcon(striker ? "sports_soccer" : "sports_handball");
+    if (els.roleTitle) els.roleTitle.textContent = striker ? "FORVET" : "KALECİ";
     els.pitch.classList.toggle("pitch--keeper", !striker);
-    els.tapLabel.textContent = "VUR";
+    els.tapLabel.textContent = striker ? "VUR" : "KURTAR";
+    els.ballHandle.setAttribute("aria-label", striker ? "Vuruş topu" : "Kurtarış topu");
     const hasAim = Boolean(match.userAim);
     els.pitchBadge.classList.toggle("is-miss", Boolean(hasAim && match.userAim.type === "miss"));
     els.pitchBadge.textContent = hasAim
@@ -457,6 +1042,7 @@
     els.gestureHint.classList.toggle("is-hidden", hasAim || match.userConfirmed);
     els.ballHandle.classList.toggle("is-confirmed", match.userConfirmed);
     els.ballHandle.setAttribute("aria-valuetext", match.userConfirmed ? "Vuruş kilitlendi" : "Vuruş butonunu kullan");
+    renderAimMarker(match.userAim);
 
     const youRoleLabel = $(".score-player--you small");
     const opponentRoleLabel = $(".score-player--opponent small");
@@ -484,14 +1070,6 @@
         : `KURTAR ${materialIcon("arrow_forward")}`;
     els.confirmButton.classList.toggle("confirm-button--keeper", !striker);
     els.confirmButton.disabled = match.phase !== "aim" || match.userConfirmed || !match.userAim;
-    els.opponentTargetLabel.textContent = striker ? "RAKİP KALECİ HEDEFİ" : "RAKİP VURUŞ HEDEFİ";
-    renderOpponentAim();
-    els.opponentActionButton.innerHTML = match.botConfirmed
-      ? `RAKİP HAZIR ${materialIcon("check")}`
-      : striker
-        ? `RAKİP KURTAR ${materialIcon("arrow_forward")}`
-        : `RAKİP VURUŞ ${materialIcon("arrow_forward")}`;
-    els.opponentActionButton.disabled = match.phase !== "aim" || match.botConfirmed || !match.botAim;
     els.opponentStatusAvatar.innerHTML = materialIcon(opponent.avatar);
     els.opponentStatusText.textContent = match.userConfirmed && match.botConfirmed
       ? "İki oyuncu hazır!"
@@ -506,17 +1084,22 @@
   }
 
   function renderDots(container, attempts, isCurrentSide) {
-    const current = state.match;
-    const total = current.suddenDeath ? 5 : 5;
+    const total = 5;
     const visibleAttempts = attempts.slice(-total);
+    const resultLabels = { goal: "Gol", save: "Kurtarış", miss: "Kaçırma" };
+    const usedCount = attempts.length > total ? `${total}+` : `${attempts.length}/${total}`;
+    if (isCurrentSide && els.youAttemptCount) els.youAttemptCount.textContent = usedCount;
+    if (!isCurrentSide && els.opponentAttemptCount) els.opponentAttemptCount.textContent = usedCount;
     let html = "";
     for (let index = 0; index < total; index += 1) {
       const result = visibleAttempts[index];
-      const className = result ? `round-dot--${result}` : "";
-      html += `<span class="round-dot ${className}"></span>`;
+      const isCurrent = !result && index === attempts.length;
+      const className = `${result ? `round-dot--${result}` : ""}${isCurrent ? " round-dot--current" : ""}`;
+      const label = result ? `${index + 1}. ${resultLabels[result] || "Sonuç"}` : `${index + 1}. Kullanılmadı`;
+      html += `<span class="round-dot ${className}" role="listitem" aria-label="${label}" title="${label}"></span>`;
     }
     container.innerHTML = html;
-    container.setAttribute("aria-label", `${isCurrentSide ? "Sen" : "Rakip"} ${attempts.length} vuruş`);
+    container.setAttribute("aria-label", `${isCurrentSide ? "Sen" : "Rakip"} ${attempts.length} penaltı kullanıldı`);
   }
 
   function updatePowerMeter(aim, striker = true) {
@@ -540,13 +1123,13 @@
     els.trajectoryPath.setAttribute("d", "M180 365 Q180 250 180 125");
     els.trajectoryEnd.setAttribute("cx", "180");
     els.trajectoryEnd.setAttribute("cy", "125");
-    $$("#targetGrid button").forEach((button) => button.classList.remove("is-selected", "is-miss-target"));
+    renderAimMarker(null);
     els.gestureHint.classList.remove("is-hidden");
   }
 
   function getAimPoint(aim) {
     const pitchRect = els.pitch.getBoundingClientRect();
-    const goalRect = els.goalFrame.getBoundingClientRect();
+    const goalRect = goalRectForAim();
     if (!aim) return { x: pitchRect.width / 2, y: pitchRect.height * 0.29 };
     if (aim.type === "miss") {
       return {
@@ -554,6 +1137,15 @@
         y: Math.max(10, Math.min(pitchRect.height - 10, (aim.y || 0.15) * pitchRect.height)),
       };
     }
+    // Continuous aim from the local player.
+    if (aim.x !== undefined && aim.y !== undefined) {
+      return {
+        x: goalRect.left - pitchRect.left + aim.x * goalRect.width,
+        y: goalRect.top - pitchRect.top + aim.y * goalRect.height,
+      };
+    }
+    // Remote aim still arrives as a discrete cell, derived by the server's
+    // nearestCell(), so this path is unchanged from before.
     const cell = Math.max(0, Math.min(8, Number(aim.cell) || 0));
     const column = cell % 3;
     const row = Math.floor(cell / 3);
@@ -576,61 +1168,69 @@
     els.trajectory.style.opacity = aim ? "1" : "0.45";
   }
 
+  // The aiming surface's rect is the canonical 0-1 goal box. Pointer input is
+  // normalised against it, never against the viewport, so two phones of
+  // different sizes agree on where a shot is.
+  function goalRectForAim() {
+    return (els.aimSurface || els.goalFrame).getBoundingClientRect();
+  }
+
+  function clamp01(value) {
+    if (!Number.isFinite(value)) return 0;
+    if (value < 0) return 0;
+    if (value > 1) return 1;
+    return value;
+  }
+
+  // Pointer (mouse, touch or pen) to a clamped goal-space point.
+  function goalPointFromPointer(event) {
+    const rect = goalRectForAim();
+    if (!rect.width || !rect.height) return null;
+    return {
+      x: clamp01((event.clientX - rect.left) / rect.width),
+      y: clamp01((event.clientY - rect.top) / rect.height),
+    };
+  }
+
+  function renderAimMarker(aim) {
+    if (!els.aimMarker) return;
+    const point = aim && aim.type !== "miss" ? aim : null;
+    if (!point || point.x === undefined) {
+      els.aimMarker.hidden = true;
+      return;
+    }
+    els.aimMarker.hidden = false;
+    els.aimMarker.style.left = `${(point.x * 100).toFixed(3)}%`;
+    els.aimMarker.style.top = `${(point.y * 100).toFixed(3)}%`;
+    els.aimMarker.classList.toggle("is-confirmed", Boolean(state.match?.userConfirmed));
+  }
+
   function setAim(aim) {
     const match = state.match;
     if (!match || match.phase !== "aim" || match.userConfirmed) return;
     match.userAim = aim;
-    $$("#targetGrid button").forEach((button) => {
-      const selected = aim.type === "goal" && Number(button.dataset.cell) === Number(aim.cell);
-      button.classList.toggle("is-selected", selected);
-      button.classList.remove("is-miss-target");
-    });
+    renderAimMarker(aim);
     els.pitchBadge.classList.toggle("is-miss", aim.type === "miss");
-    els.pitchBadge.textContent = aim.type === "miss" ? "KALE DIŞI!" : userIsStriker() ? "HEDEF SEÇİLDİ" : "DİVE NOKTASI";
-    els.ballHandle.setAttribute("aria-valuetext", aim.type === "miss" ? "Kale dışı hedef" : `Hedef ${Number(aim.cell) + 1}`);
+    els.pitchBadge.textContent = aim.type === "miss"
+      ? "KALE DIŞI!"
+      : userIsStriker() ? "HEDEF SEÇİLDİ" : "DİVE NOKTASI";
+    els.ballHandle.setAttribute(
+      "aria-valuetext",
+      aim.type === "miss"
+        ? "Kale dışı hedef"
+        : `Hedef yatay %${Math.round(aim.x * 100)}, dikey %${Math.round(aim.y * 100)}`,
+    );
     els.gestureHint.classList.add("is-hidden");
     updateTrajectory(aim);
     renderMatch();
     playTone(aim.type === "miss" ? 260 : 480, 0.045, "triangle");
   }
 
-  function renderOpponentAim() {
-    const match = state.match;
-    if (!match || !els.opponentTargetGrid) return;
-    $$("button[data-cell]", els.opponentTargetGrid).forEach((button) => {
-      const selected = match.botAim?.type === "goal" && Number(button.dataset.cell) === Number(match.botAim.cell);
-      button.classList.toggle("is-selected", selected);
-      button.disabled = match.phase !== "aim" || match.botConfirmed;
-    });
-  }
-
-  function setOpponentAim(cell) {
-    const match = state.match;
-    if (!match || match.phase !== "aim" || match.botConfirmed) return;
-    match.botAim = { type: "goal", cell: Number(cell) };
-    renderMatch();
-    els.opponentActionButton.classList.add("has-selection");
-    playTone(390, 0.045, "triangle");
-  }
-
-  function confirmOpponentAction() {
-    const match = state.match;
-    if (!match || match.phase !== "aim" || match.botConfirmed) return;
-    if (!match.botAim) {
-      showToast("Rakip önce bir hedef seçmeli.", "orange");
+  function confirmUserAction() {
+    if (state.realtime) {
+      confirmRealtimeUserAction();
       return;
     }
-    match.botConfirmed = true;
-    els.opponentStatusText.textContent = "İki oyuncu hazır!";
-    els.statusPulse.classList.add("is-ready");
-    els.opponentActionButton.textContent = "RAKİP HAZIR";
-    els.opponentActionButton.disabled = true;
-    playTone(640, 0.08, "triangle");
-    renderMatch();
-    maybeStartCountdown();
-  }
-
-  function confirmUserAction() {
     const match = state.match;
     if (!match || match.phase !== "aim" || match.userConfirmed) return;
     if (!match.userAim) {
@@ -651,6 +1251,7 @@
     if (!match || match.phase !== "aim" || !match.userConfirmed || !match.botConfirmed) return;
     match.phase = "countdown";
     renderMatch();
+    playSound("whistle", 0.8);
     els.countdownOverlay.hidden = false;
     const sequence = [
       { number: "3", word: "HAZIR OL", duration: 620 },
@@ -696,6 +1297,7 @@
       if (result === "save") match.saves[goalkeeperIndex] += 1;
       match.phase = "result";
       renderMatch();
+      showScoreFeedback(result);
       showShotResult(result, strikerIndex, goalkeeperIndex);
     }, 620);
   }
@@ -716,16 +1318,40 @@
     els.football.style.setProperty("--flight-y", `${dy}px`);
     els.football.classList.add("is-flight", `is-flight--${result}`);
     setKeeperAnimation(keeperAim);
-    playTone(result === "goal" ? 880 : result === "save" ? 190 : 300, 0.13, result === "goal" ? "triangle" : "sawtooth");
+    playSound("kick", 0.9);
+    if (result === "goal") {
+      playSound("goalNet", 0.9);
+      if (userIsStriker()) playSound("cheer", 0.9);
+      else playSound("conceded", 0.88);
+    }
+    if (result === "save") {
+      const saveSound = userIsStriker() ? "save" : "userSave";
+      shotSoundTimer = window.setTimeout(() => {
+        if (state.match === match && match.phase === "resolving") playSound(saveSound, 0.92);
+      }, 420);
+    }
   }
 
   function setKeeperAnimation(aim) {
     els.keeper.className = "keeper";
     if (!aim || aim.type === "miss") return;
-    const column = Number(aim.cell) % 3;
-    const row = Math.floor(Number(aim.cell) / 3);
+    // Continuous aim maps onto the same nine dive directions by thirds, so at
+    // a cell centre the animation is identical to the discrete version.
+    let column;
+    let row;
+    if (aim.x !== undefined && aim.y !== undefined) {
+      const band = (value) => (value < 1 / 3 ? 0 : value > 2 / 3 ? 2 : 1);
+      column = band(aim.x);
+      row = band(aim.y);
+    } else {
+      const cell = Math.max(0, Math.min(8, Number(aim.cell) || 0));
+      column = cell % 3;
+      row = Math.floor(cell / 3);
+    }
     if (column === 0 && row === 0) els.keeper.classList.add("keeper--dive-high-left");
     else if (column === 2 && row === 0) els.keeper.classList.add("keeper--dive-high-right");
+    else if (column === 0 && row === 2) els.keeper.classList.add("keeper--dive-low-left");
+    else if (column === 2 && row === 2) els.keeper.classList.add("keeper--dive-low-right");
     else if (column === 0) els.keeper.classList.add("keeper--dive-left");
     else if (column === 2) els.keeper.classList.add("keeper--dive-right");
     else if (row === 0) els.keeper.classList.add("keeper--dive-high");
@@ -743,7 +1369,7 @@
       message = userStriker ? "Rakip şutu kurtardı." : "Harika refleks! Kaleyi savundun.";
       icon = "sports_handball";
     } else if (result === "goal" && !userStriker) {
-      title = "GOL YEDİ!";
+      title = "GOL YEDİM!";
       message = "Rakip golü ağlara götürdü.";
       icon = "sports_soccer";
     } else if (result === "miss") {
@@ -766,7 +1392,7 @@
       "match-finish": "SONUÇLARI GÖR",
     };
     state.resultAction = action;
-    els.resultCard.className = `result-card result-card--${result}`;
+    els.resultCard.className = `result-card result-card--${result}${result === "goal" && !userStriker ? " result-card--conceded" : ""}`;
     els.resultIcon.innerHTML = materialIcon(icon);
     els.resultEyebrow.textContent = match.suddenDeath ? "ALTIN PENALTI" : "VURUŞ SONU";
     els.resultTitle.textContent = title;
@@ -800,6 +1426,10 @@
   }
 
   function handleResultPrimary() {
+    if (state.realtime) {
+      handleRealtimeResultPrimary();
+      return;
+    }
     const match = state.match;
     if (!match) return;
     const action = state.resultAction;
@@ -830,6 +1460,13 @@
 
   function handleResultSecondary() {
     els.resultOverlay.hidden = true;
+    // Exiting a finished match really means leaving the room and going back
+    // to the main menu; there is no lobby to return to.
+    if (state.realtime && realtimeFinishedShown) {
+      window.PenaltiShared?.leaveRoom?.();
+      window.location.href = "index.html";
+      return;
+    }
     exitToLobby();
   }
 
@@ -837,6 +1474,7 @@
     const match = state.match;
     if (!match) return;
     clearMatchTimers();
+    stopCrowdAmbience();
     match.phase = "finished";
     resetPitchVisuals();
     if (match.tournamentIndex !== null && !match.tournamentRecorded) {
@@ -860,7 +1498,89 @@
     playTone(userWon ? 1100 : 240, 0.18, userWon ? "triangle" : "sine");
   }
 
+  // ---- opponent left: full screen state instead of a toast the player can miss ----
+  let opponentLeftTimer = null;
+  let opponentLeftDeadline = 0;
+  let lastOpponentLeftScore = null;
+
+  function clearOpponentLeftCountdown() {
+    if (opponentLeftTimer) window.clearInterval(opponentLeftTimer);
+    opponentLeftTimer = null;
+    opponentLeftDeadline = 0;
+  }
+
+  function closeOpponentLeftCard() {
+    clearOpponentLeftCountdown();
+    if (els.opponentLeftOverlay) els.opponentLeftOverlay.hidden = true;
+  }
+
+  function showOpponentLeftCard(payload = {}) {
+    if (!els.opponentLeftOverlay) return;
+    const canReconnect = payload.canReconnect !== false;
+    els.opponentLeftEyebrow.textContent = canReconnect ? "BAĞLANTI KESİLDİ" : "RAKİP AYRILDI";
+    els.opponentLeftTitle.textContent = canReconnect ? "Rakip ayrıldı" : "Rakip ayrıldı";
+    els.opponentLeftMessage.textContent = payload.message
+      || (canReconnect ? "Rakibin bağlantısı koptu." : "Rakip odayı terk etti.");
+    els.opponentLeftIcon.textContent = canReconnect ? "wifi_off" : "person_off";
+    els.opponentLeftLobbyButton.textContent = "LOBİYE DÖN";
+
+    // Current score, so the remaining player knows where the duel stands.
+    // Later events (such as room:playerLeft) may not carry it, so keep the
+    // last known score rather than blanking the card.
+    const score = payload.score || lastOpponentLeftScore;
+    if (score) {
+      lastOpponentLeftScore = score;
+      const youIndex = roomIndexOf(window.PenaltiShared.getPlayerToken());
+      els.opponentLeftScore.hidden = false;
+      els.opponentLeftYouScore.textContent = String(youIndex === 1 ? score.player2 : score.player1);
+      els.opponentLeftRivalScore.textContent = String(youIndex === 1 ? score.player1 : score.player2);
+    } else {
+      els.opponentLeftScore.hidden = true;
+    }
+
+    clearOpponentLeftCountdown();
+    const graceMs = Number(payload.graceMs) || 0;
+    els.opponentLeftWaitButton.hidden = !canReconnect;
+    if (canReconnect && graceMs > 0) {
+      els.opponentLeftTimer.hidden = false;
+      els.opponentLeftWaitButton.disabled = false;
+      els.opponentLeftWaitButton.innerHTML = `YENİDEN BAĞLAN ${materialIcon("wifi_tethering")}`;
+      opponentLeftDeadline = Date.now() + graceMs;
+      const tick = () => {
+        const left = Math.max(0, Math.ceil((opponentLeftDeadline - Date.now()) / 1000));
+        els.opponentLeftCountdown.textContent = String(left);
+        if (left <= 0) clearOpponentLeftCountdown();
+      };
+      tick();
+      opponentLeftTimer = window.setInterval(tick, 250);
+    } else {
+      // Grace period is over: no reconnect button, only the way out.
+      els.opponentLeftTimer.hidden = true;
+    }
+    els.opponentLeftOverlay.hidden = false;
+  }
+
+  function roomIndexOf(playerId) {
+    const players = state.room?.players || window.PenaltiShared.getRoomState()?.players || [];
+    const index = players.findIndex((player) => player.id === playerId);
+    return index < 0 ? 0 : index;
+  }
+
+  function exitRealtime() {
+    stopCrowdAmbience();
+    // The match is over, so keep the room snapshot: the lobby can then show
+    // the finished state. Calling leaveRoom() here would clear the snapshot
+    // and the lobby would bounce straight back to the main menu.
+    window.location.href = "lobby.html";
+  }
+
   function exitToLobby() {
+    stopCrowdAmbience();
+    if (document.body.dataset.page === "game") {
+      if (state.realtime) window.PenaltiShared?.leaveRoom?.();
+      window.location.href = "lobby.html";
+      return;
+    }
     clearMatchTimers();
     hideOverlays();
     state.match = null;
@@ -1053,6 +1773,11 @@
   }
 
   function leaveTournament() {
+    stopCrowdAmbience();
+    if (document.body.dataset.page === "game") {
+      window.location.href = "lobby.html";
+      return;
+    }
     state.match = null;
     state.tournament = null;
     state.room = false;
@@ -1073,6 +1798,45 @@
     els.rulesSheet.hidden = true;
   }
 
+  function openExitConfirmation() {
+    if (!els.exitConfirmOverlay) return;
+    const exitText = $("#exitConfirmText");
+    if (exitText) {
+      exitText.textContent = !els.resultOverlay.hidden
+        ? "Bu sonuç ekranından çıkıp lobeye dönmek istediğine emin misin?"
+        : "Maçtan çıkarsanız bu maç sonuçlanmadan kapanacak.";
+    }
+    els.exitConfirmOverlay.hidden = false;
+    els.exitConfirmCancel?.focus();
+  }
+
+  function closeExitConfirmation() {
+    if (els.exitConfirmOverlay) els.exitConfirmOverlay.hidden = true;
+  }
+
+  function leaveCurrentMatch() {
+    closeExitConfirmation();
+    if (state.match?.tournamentIndex !== null && state.match?.tournamentIndex !== undefined) {
+      stopCrowdAmbience();
+      state.match = null;
+      clearMatchTimers();
+      hideOverlays();
+      showTournament();
+    } else {
+      exitToLobby();
+    }
+  }
+
+  function confirmExitAction() {
+    const fromResult = !els.resultOverlay.hidden;
+    closeExitConfirmation();
+    if (fromResult) {
+      handleResultSecondary();
+      return;
+    }
+    leaveCurrentMatch();
+  }
+
   // Events
   $$(".mode-button").forEach((button) => button.addEventListener("click", () => setMode(button.dataset.mode)));
   els.createRoomButton.addEventListener("click", () => setupDemoRoom());
@@ -1089,50 +1853,123 @@
   els.startButton.addEventListener("click", startRoom);
   els.quickDemoButton.addEventListener("click", quickDemo);
   els.leaveMatchButton.addEventListener("click", () => {
-    if (state.match?.tournamentIndex !== null && state.match?.tournamentIndex !== undefined) {
-      state.match = null;
-      clearMatchTimers();
-      hideOverlays();
-      showTournament();
-    } else {
-      exitToLobby();
+    if (state.match && state.match.phase !== "finished") openExitConfirmation();
+    else leaveCurrentMatch();
+  });
+  els.exitConfirmCancel?.addEventListener("click", closeExitConfirmation);
+  els.exitConfirmConfirm?.addEventListener("click", confirmExitAction);
+  els.exitConfirmBackdrop?.addEventListener("click", closeExitConfirmation);
+  els.opponentLeftWaitButton?.addEventListener("click", async () => {
+    const button = els.opponentLeftWaitButton;
+    if (!button || button.disabled) return;
+    button.disabled = true;
+    button.innerHTML = `BAĞLANILIYOR… ${materialIcon("hourglass_top")}`;
+    // Re-attach to the room and re-sync, then keep waiting for the opponent.
+    const response = await rejoinRealtimeRoom();
+    const back = response?.room?.players?.find((player) => player.id !== window.PenaltiShared.getPlayerToken());
+    if (back && back.connected !== false) {
+      closeOpponentLeftCard();
+      if (state.match) {
+        state.match.phase = "aim";
+        els.opponentStatusText.textContent = "Rakip yeniden bağlandı.";
+        renderMatch();
+      }
+      return;
     }
+    button.disabled = false;
+    button.innerHTML = `YENİDEN BAĞLAN ${materialIcon("wifi_tethering")}`;
+    showToast("Rakip hâlâ bağlı değil.", "orange");
+  });
+  els.opponentLeftLobbyButton?.addEventListener("click", () => {
+    closeOpponentLeftCard();
+    window.location.href = "lobby.html";
   });
   els.leaveTournamentButton.addEventListener("click", leaveTournament);
   els.tournamentNextButton.addEventListener("click", tournamentNext);
   els.confirmButton.addEventListener("click", confirmUserAction);
-  els.opponentActionButton.addEventListener("click", confirmOpponentAction);
-  els.targetGrid.addEventListener("click", (event) => {
-    const button = event.target.closest("button[data-cell]");
-    if (button) setAim({ type: "goal", cell: Number(button.dataset.cell) });
+
+  // ---- continuous aiming surface ----
+  // Pointer events cover mouse, touch and pen with one code path. Dragging
+  // refines the target; the shot is only locked by the confirm button.
+  let aimPointerActive = false;
+
+  function aimFromPointerEvent(event) {
+    const point = goalPointFromPointer(event);
+    if (!point) return;
+    setAim({ type: "goal", x: point.x, y: point.y });
+  }
+
+  els.aimSurface?.addEventListener("pointerdown", (event) => {
+    if (!state.match || state.match.phase !== "aim" || state.match.userConfirmed) return;
+    aimPointerActive = true;
+    els.aimSurface.setPointerCapture?.(event.pointerId);
+    aimFromPointerEvent(event);
+    event.preventDefault();
   });
-  els.opponentTargetGrid.addEventListener("click", (event) => {
-    const button = event.target.closest("button[data-cell]");
-    if (button) setOpponentAim(Number(button.dataset.cell));
+
+  els.aimSurface?.addEventListener("pointermove", (event) => {
+    if (!aimPointerActive) return;
+    aimFromPointerEvent(event);
+    event.preventDefault();
+  });
+
+  const endAimPointer = (event) => {
+    if (!aimPointerActive) return;
+    aimPointerActive = false;
+    els.aimSurface?.releasePointerCapture?.(event.pointerId);
+  };
+  els.aimSurface?.addEventListener("pointerup", endAimPointer);
+  els.aimSurface?.addEventListener("pointercancel", endAimPointer);
+
+  // Keyboard access, replacing the nine focusable buttons.
+  els.aimSurface?.addEventListener("keydown", (event) => {
+    const nudge = { ArrowLeft: [-0.04, 0], ArrowRight: [0.04, 0], ArrowUp: [0, -0.04], ArrowDown: [0, 0.04] }[event.key];
+    if (!nudge) return;
+    event.preventDefault();
+    const current = state.match?.userAim;
+    const base = current && current.x !== undefined
+      ? { x: current.x, y: current.y }
+      : { x: 0.5, y: 0.5 };
+    setAim({ type: "goal", x: clamp01(base.x + nudge[0]), y: clamp01(base.y + nudge[1]) });
   });
   els.resultPrimaryButton.addEventListener("click", handleResultPrimary);
-  els.resultSecondaryButton.addEventListener("click", handleResultSecondary);
+  els.resultSecondaryButton.addEventListener("click", openExitConfirmation);
   els.rulesButton.addEventListener("click", openRules);
   els.closeRulesButton.addEventListener("click", closeRules);
   els.rulesBackdrop.addEventListener("click", closeRules);
   els.brandHome.addEventListener("click", (event) => {
     event.preventDefault();
-    if (state.tournament && !state.match) showTournament();
-    else exitToLobby();
+    stopCrowdAmbience();
+    if (state.realtime) window.PenaltiShared?.leaveRoom?.();
+    window.location.href = "index.html";
   });
   els.soundToggle.addEventListener("click", () => {
     state.sound = !state.sound;
+    window.PenaltiShared?.setSoundEnabled?.(state.sound);
     els.soundToggle.setAttribute("aria-pressed", String(state.sound));
-    if (state.sound) playTone(600, 0.07);
+    if (state.sound) {
+      playTone(600, 0.07);
+      if (state.match && state.match.phase !== "finished") startCrowdAmbience();
+    } else {
+      stopCrowdAmbience();
+    }
   });
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
-      if (!els.rulesSheet.hidden) closeRules();
-      else if (!els.resultOverlay.hidden) handleResultSecondary();
+      if (els.exitConfirmOverlay && !els.exitConfirmOverlay.hidden) closeExitConfirmation();
+      else if (!els.rulesSheet.hidden) closeRules();
+      else if (!els.resultOverlay.hidden) openExitConfirmation();
     }
   });
 
+  document.addEventListener("pointerdown", resumeCrowdAmbience);
+  document.addEventListener("keydown", resumeCrowdAmbience);
+  document.addEventListener("touchstart", resumeCrowdAmbience, { passive: true });
+  window.addEventListener("pagehide", stopCrowdAmbience);
+
+  preloadMatchSounds();
+  if (els.soundToggle) els.soundToggle.setAttribute("aria-pressed", String(state.sound));
   updateModeButtons();
   renderLobby();
 })();
