@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0B0C10" />
+    <meta name="description" content="Penaltı Düello — odaya katıl." />
+    <title>Odaya Katıl · Penaltı Düello</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Inter:wght@400;500;600;700;800;900&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400,0,0&family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="js/shared.js" defer></script>
+    <script src="js/join-room.js" defer></script>
+  </head>
+  <body data-page="join-room">
+    <div class="loading-screen" id="loadingScreen" role="status" aria-live="polite" aria-busy="true" aria-label="Yükleniyor">
+      <div class="loading-screen__content">
+        <div class="loading-screen__ball" aria-hidden="true"><img src="assets/clker-free-vector-images-soccer-ball-310065.svg" alt="" draggable="false" /></div>
+        <span class="loading-screen__label">YÜKLENİYOR</span>
+      </div>
+    </div>
+
+    <div class="app-background" aria-hidden="true">
+      <div class="background-orb background-orb--green"></div>
+      <div class="background-orb background-orb--orange"></div>
+      <div class="background-grid"></div>
+    </div>
+
+    <main class="app-shell">
+      <header class="app-header">
+        <a class="brand" href="index.html" aria-label="Penaltı Düello ana sayfa">
+          <span class="brand-mark" aria-hidden="true"><img class="brand-logo-image" src="assets/occ.png" alt="" /></span>
+          <span class="brand-copy brand-copy--visually-hidden"><strong>PENALTI</strong><em>DÜELLO</em></span>
+        </a>
+        <div class="header-actions">
+          <button class="icon-button" id="soundToggle" type="button" aria-label="Sesi aç veya kapat" aria-pressed="true">
+            <svg class="icon icon-sound-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.2l4.3 3.4V6.1L7.2 9.5H4Zm12.2-.8a5.2 5.2 0 0 1 0 6.6M18.8 6a8.8 8.8 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            <svg class="icon icon-sound-off" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 16 16M10 9.2 4 9.5v5h3.2l4.3 3.4v-3.8m2.7-4.6a5.2 5.2 0 0 1 .6 6.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          </button>
+        </div>
+      </header>
+
+      <section class="flow-page" aria-labelledby="joinRoomTitle">
+        <div class="flow-topline">
+          <a class="back-link" href="index.html">‹ ANA MENÜ</a>
+          <span class="eyebrow">ODAYA KATIL</span>
+        </div>
+
+        <div class="players-card flow-card">
+          <div class="section-heading">
+            <div><span class="eyebrow">ODA KODU</span><h2 id="joinRoomTitle">Odaya katıl</h2></div>
+            <span class="player-count">6 HANE</span>
+          </div>
+          <p class="flow-copy">Arkadaşının paylaştığı 6 haneli oda kodunu gir.</p>
+          <form id="joinRoomForm" novalidate>
+            <label for="joinRoomCode">ODAKODU</label>
+            <input id="joinRoomCode" name="roomCode" type="text" inputmode="text" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="AB3F9K" aria-describedby="joinRoomError" required />
+            <p class="form-hint form-error" id="joinRoomError" role="alert" aria-live="polite"></p>
+            <button class="action-button action-button--primary flow-submit" id="joinRoomSubmit" type="submit">
+              <span class="action-button-icon material-symbols-rounded">login</span>
+              <span class="action-button__copy"><strong>ODAYA KATIL</strong><small>6 haneli kodu gir</small></span>
+              <span class="button-arrow material-symbols-rounded">arrow_forward</span>
+            </button>
+          </form>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
