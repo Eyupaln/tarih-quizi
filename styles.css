@@ -3133,7 +3133,15 @@ body.is-loading {
   }
 }
 
-@media (max-height: 760px) and (max-width: 520px) {
+/* Short viewports. Every declaration in here trades size for height, so the
+   test that matters is height, not width. It used to also require
+   max-width: 520px, which meant a phone in landscape (~844px wide, ~390px tall)
+   matched none of it: the pitch stayed 430px, taller than the viewport, the
+   goal showed only its top 29px of 137px, and the confirm button ended up 430px
+   below the fold, so the round could not be played at all. The width cap is now
+   1000px, which covers every phone orientation while still leaving a normal
+   desktop window alone. */
+@media (max-height: 760px) and (max-width: 1000px) {
   .app-shell {
     padding-top: calc(10px + var(--safe-top));
   }
