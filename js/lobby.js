@@ -48,6 +48,8 @@
       goToGame();
       return;
     }
+    // A finished room stays in the lobby so the result can be reviewed.
+    if (room.status === "finished") return;
     maybeStartMatch();
   }
 
@@ -59,17 +61,33 @@
     const readyCount = players.filter((player) => player.ready && player.connected !== false).length;
     const allReady = allPlayersReady();
 
+    const finished = room.status === "finished";
+    const finalScore = room.match?.score || {};
     if (roomCodeLabel) roomCodeLabel.textContent = room.code || "----";
     if (lobbyRoomLabel) lobbyRoomLabel.textContent = `ODA · ${room.code || "----"}`;
-    if (roomPlayerCount) roomPlayerCount.textContent = `${players.length}/${total} oyuncu`;
-    if (lobbyPlayerCount) lobbyPlayerCount.textContent = `${players.length}/${total}`;
-    if (lobbyTitle) lobbyTitle.textContent = "1v1 Düello";
+    if (roomPlayerCount) {
+      roomPlayerCount.textContent = finished
+        ? `${finalScore.player1 ?? 0} – ${finalScore.player2 ?? 0}`
+        : `${players.length}/${total} oyuncu`;
+    }
+    if (lobbyPlayerCount) {
+      lobbyPlayerCount.textContent = finished
+        ? `${finalScore.player1 ?? 0} – ${finalScore.player2 ?? 0}`
+        : `${players.length}/${total}`;
+    }
+    if (lobbyTitle) lobbyTitle.textContent = finished ? "Maç Sonucu" : "1v1 Düello";
 
     const slots = [];
     players.forEach((player) => {
       const isYou = player.id === shared.getPlayerToken();
       const connected = player.connected !== false;
-      const status = !connected ? "BAĞLANTI KOPTU" : player.ready ? "HAZIR" : "BEKLENİYOR";
+      const status = !connected
+        ? "BAĞLANTI KOPTU"
+        : finished
+          ? "MAÇ BİTTİ"
+          : player.ready
+            ? "HAZIR"
+            : "BEKLENİYOR";
       const statusClass = !connected ? "slot-status--waiting" : player.ready ? "slot-status--ready" : "slot-status--waiting";
       slots.push(`
         <div class="player-slot ${isYou ? "player-slot--you" : ""}" role="listitem">
@@ -91,19 +109,28 @@
     if (lobbyPlayerSlots) lobbyPlayerSlots.innerHTML = slots.join("");
 
     if (readyButton) {
-      readyButton.disabled = !you || room.status !== "waiting" || you.connected === false;
+      readyButton.disabled = finished || !you || room.status !== "waiting" || you.connected === false;
       readyButton.classList.toggle("is-ready", Boolean(you?.ready));
     }
-    if (readyButtonLabel) readyButtonLabel.textContent = you?.ready ? "HAZIRSIN" : "HAZIR OL";
+    if (readyButtonLabel) {
+      readyButtonLabel.textContent = finished ? "MAÇ BİTTİ" : you?.ready ? "HAZIRSIN" : "HAZIR OL";
+    }
     if (readyBarText) {
-      if (players.some((player) => player.connected === false)) readyBarText.textContent = "Rakip bağlantısı bekleniyor…";
+      if (finished) {
+        const score = room.match?.score || {};
+        readyBarText.textContent = `Maç sona erdi · ${score.player1 ?? 0} – ${score.player2 ?? 0}`;
+      } else if (players.some((player) => player.connected === false)) readyBarText.textContent = "Rakip bağlantısı bekleniyor…";
       else if (allReady) readyBarText.textContent = "Herkes hazır! Maç başlıyor…";
       else readyBarText.textContent = `${readyCount}/${total} oyuncu hazır`;
     }
     if (startButton) {
       startButton.classList.add("is-visible");
-      startButton.disabled = !isHost() || !allReady || starting || room.status !== "waiting";
-      startButton.innerHTML = isHost() ? `MAÇI BAŞLAT ${materialIcon("arrow_forward")}` : `RAKİP HAZIR OLSUN ${materialIcon("arrow_forward")}`;
+      startButton.disabled = finished || !isHost() || !allReady || starting || room.status !== "waiting";
+      startButton.innerHTML = finished
+        ? `ANA MENÜ ${materialIcon("arrow_forward")}`
+        : isHost()
+          ? `MAÇI BAŞLAT ${materialIcon("arrow_forward")}`
+          : `RAKİP HAZIR OLSUN ${materialIcon("arrow_forward")}`;
     }
   }
 
@@ -229,7 +256,14 @@
     bindSocketEvents();
 
     readyButton?.addEventListener("click", toggleReady);
-    startButton?.addEventListener("click", maybeStartMatch);
+    startButton?.addEventListener("click", () => {
+      if (room?.status === "finished") {
+        shared.leaveRoom();
+        shared.goTo("index.html");
+        return;
+      }
+      maybeStartMatch();
+    });
     copyCodeButton?.addEventListener("click", copyRoomCode);
     document.querySelectorAll(".lobby-page-actions .back-link, .flow-topline .back-link").forEach((link) => {
       link.addEventListener("click", () => shared.leaveRoom());

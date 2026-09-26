@@ -725,9 +725,15 @@
   }
 
   function handleRealtimeResultPrimary() {
-    if (state.resultAction === "realtime-finish" || state.realtimeFinished || state.resultAction === "match-finish") {
-      if (state.realtimeFinished) showRealtimeFinished(state.realtimeFinished);
-      else exitToLobby();
+    // The final screen is already open, so this button means "leave".
+    // Calling showRealtimeFinished again would be a no-op and the player
+    // would be stuck on the result screen.
+    if (realtimeFinishedShown) {
+      exitRealtime();
+      return;
+    }
+    if (state.resultAction === "match-finish" || state.realtimeFinished) {
+      showRealtimeFinished(state.realtimeFinished || {});
       return;
     }
     if (!["next-round", "start-sudden", "next-sudden"].includes(state.resultAction)) return;
@@ -1371,6 +1377,13 @@
 
   function handleResultSecondary() {
     els.resultOverlay.hidden = true;
+    // Exiting a finished match really means leaving the room and going back
+    // to the main menu; there is no lobby to return to.
+    if (state.realtime && realtimeFinishedShown) {
+      window.PenaltiShared?.leaveRoom?.();
+      window.location.href = "index.html";
+      return;
+    }
     exitToLobby();
   }
 
@@ -1400,6 +1413,14 @@
     renderConfetti(userWon);
     els.resultOverlay.hidden = false;
     playTone(userWon ? 1100 : 240, 0.18, userWon ? "triangle" : "sine");
+  }
+
+  function exitRealtime() {
+    stopCrowdAmbience();
+    // The match is over, so keep the room snapshot: the lobby can then show
+    // the finished state. Calling leaveRoom() here would clear the snapshot
+    // and the lobby would bounce straight back to the main menu.
+    window.location.href = "lobby.html";
   }
 
   function exitToLobby() {
