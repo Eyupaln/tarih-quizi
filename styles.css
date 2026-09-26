@@ -1193,30 +1193,6 @@ body.is-loading {
   background: linear-gradient(100deg, rgba(16, 43, 59, 0.62), rgba(7, 20, 33, 0.82));
 }
 
-/* Server-authoritative round clock. Sits under the round counter rather than
-   beside it, so it costs no horizontal space on a narrow phone. Turns amber as
-   the window runs out, which is the warning that the sweep is about to pick. */
-.round-timer {
-  margin-top: 4px;
-  padding: 2px 7px;
-  border: 1px solid rgba(0, 255, 102, 0.28);
-  border-radius: 6px;
-  background: rgba(0, 255, 102, 0.07);
-  color: #d8f6e6;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-  transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
-}
-
-.round-timer.is-time-warning {
-  border-color: rgba(255, 138, 61, 0.7);
-  background: rgba(255, 109, 0, 0.16);
-  color: #ffd9bd;
-}
-
 .round-copy {
   min-width: 60px;
 }

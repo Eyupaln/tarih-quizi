@@ -50,7 +50,6 @@
     opponentAttemptDots: $("#opponentAttemptDots"),
     youAttemptCount: $("#youAttemptCount"),
     opponentAttemptCount: $("#opponentAttemptCount"),
-    roleTimer: $("#roleTimer"),
     pitch: $("#pitch"),
     goalFrame: $("#goalFrame"),
     aimSurface: $("#aimSurface"),
@@ -141,14 +140,9 @@
       els.loadingScreen.setAttribute("aria-busy", "false");
       els.loadingScreen.setAttribute("aria-hidden", "true");
       document.body.classList.remove("is-loading");
-      // The pitch is only visible now, so this is the earliest honest moment to
-      // tell the server the round can be seen.
-      loadingScreenDone = true;
-      sendRoundAck();
     }, loadingDuration);
   } else {
     document.body.classList.remove("is-loading");
-    loadingScreenDone = true;
   }
 
   const BOT_POOL = {
@@ -175,12 +169,11 @@
     realtime: false,
   };
 
-  // Round acknowledgement gates. See noteRoundDrawn.
-  let loadingScreenDone = false;
-  let ackedRound = 0;
-
+  // A round has no time limit, so the client keeps no clock for one. The match
+  // waits for both players instead of racing them, which means the only thing
+  // the UI has to convey is "still waiting", and the confirm button and the
+  // opponent status line already say exactly that.
   let toastTimer = null;
-  let roundTimer = null;
   let countdownTimers = [];
   // Match-scoped timeouts that must all be cancellable at once. Shot resolution
   // nests two setTimeouts, and a single handle could only ever point at the
@@ -244,13 +237,11 @@
   }
 
   function clearMatchTimers() {
-    if (roundTimer) window.clearInterval(roundTimer);
     trackedTimeouts.forEach((timer) => window.clearTimeout(timer));
     trackedTimeouts.clear();
     if (scoreFeedbackTimer) window.clearTimeout(scoreFeedbackTimer);
     if (shotSoundTimer) window.clearTimeout(shotSoundTimer);
     countdownTimers.forEach((timer) => window.clearTimeout(timer));
-    roundTimer = null;
     scoreFeedbackTimer = null;
     shotSoundTimer = null;
     countdownTimers = [];
@@ -635,9 +626,6 @@
     if (!room) return;
     realtimeMatchActive = true;
     realtimeFinishedShown = false;
-    // A rematch restarts at round 1, so the per-round acknowledgement latch has
-    // to be cleared with the match or round 1 would never be acknowledged.
-    ackedRound = 0;
     state.realtime = true;
     state.mode = "duo";
     applyRealtimeRoom(room);
@@ -652,9 +640,6 @@
       userConfirmed: false,
       botConfirmed: false,
       startedAt: Date.now(),
-      autoPicked: [],
-      deadlineLeftMs: null,
-      deadlineArmedAt: null,
       tournamentIndex: null,
       tournamentRecorded: false,
       lastResult: null,
@@ -687,15 +672,6 @@
     const nextRound = Number(payload?.round);
     const alreadyReady = state.match.phase === "aim" && nextRound === state.match.round;
     updateRealtimeRound(payload);
-    // Only re-arm from a payload that actually carries a window. A replayed
-    // round:ready that is still ack-pending must not wipe a countdown that is
-    // already running, which would drop the timer back to the waiting dots for
-    // the rest of the round. A replayed payload that does carry real timing is
-    // still honoured, because that keeps the countdown honest for whichever
-    // player pressed the result button last.
-    if (payload?.remainingMs !== null && payload?.remainingMs !== undefined) {
-      armRoundCountdown(payload);
-    }
     if (alreadyReady) {
       // Duplicate round:ready (both players pressed the result button).
       // The round is already running, so just refresh the view.
@@ -711,20 +687,6 @@
     if (!match || match.phase === "resolving" || match.phase === "result") return;
     updateRealtimeRound(payload);
     match.suddenDeath = Boolean(payload.goldenPenalty && payload.round > 10);
-    // The server filled in a side that ran out of time. Say whose it was, so
-    // the player is never left guessing why their input was thrown away. Kept
-    // on the match as well, because the toast is transient and the result
-    // screen outlives it.
-    match.autoPicked = payload.expired && Array.isArray(payload.autoPicked) ? [...payload.autoPicked] : [];
-    if (payload.expired) {
-      const mine = match.youRole && match.autoPicked.includes(match.youRole);
-      showToast(
-        mine
-          ? "Süre doldu, hedefin otomatik seçildi."
-          : "Süre doldu, rakibin hedefi otomatik seçildi.",
-        "orange",
-      );
-    }
     const forvetZone = Number(payload.forvetZone);
     const kaleciZone = Number(payload.kaleciZone);
     if (!Number.isInteger(forvetZone) || !Number.isInteger(kaleciZone)) return;
@@ -842,12 +804,6 @@
     } catch (error) {
       match.userConfirmed = false;
       renderMatch();
-      if (error.code === "TURN_EXPIRED") {
-        // The server already filled the target in, so the round is over for us.
-        // The round:result that follows carries the auto-picked notice.
-        showToast("Süre doldu, hedefin otomatik seçildi.", "orange");
-        return;
-      }
       if (error.code === "STALE_ROUND") {
         // Our input belonged to a round that has already moved on. The aim is
         // kept so the player can simply press again if the round is still live.
@@ -869,15 +825,10 @@
       });
       if (!response?.ok) return null;
       if (response.room) applyRealtimeRoom(response.room);
-      // Unfreeze the local round so input works again after a reconnect.
+      // Unfreeze the local round so input works again after a reconnect. A round
+      // has no clock, so there is no time left to re-arm here: the round that is
+      // still open on the server is simply the round this client rejoins.
       if (state.match && state.match.phase !== "finished") {
-        // The round kept running while we were away, so the server reports what
-        // is left of it. Re-arming here shows the real time remaining instead
-        // of a full window we no longer have.
-        if (state.match.phase === "aim") {
-          armRoundCountdown(response);
-          noteRoundDrawn();
-        }
         if (state.match.phase === "waiting-opponent") {
           state.match.phase = "aim";
           els.opponentStatusText.textContent = userIsStriker() ? "Rakip kaleyi savunuyor…" : "Rakip şutunu hazırlıyor…";
@@ -1001,63 +952,12 @@
     return Boolean(state.match && state.match.round % 2 === 1);
   }
 
-  // Arms the visual countdown from the server's timing fields. We deliberately
-  // never compare our clock to the server's deadline: the two can be seconds
-  // apart on a phone, and a skewed clock would show a countdown that is already
-  // over or never ends. Instead the server sends how much of the window is
-  // left right now (remainingMs), and we count down from there on our own
-  // monotonic clock. Same numbers, no clock comparison.
-  function armRoundCountdown(payload = {}) {
-    const match = state.match;
-    if (!match) return;
-    // Number(null) is 0 and Number.isFinite(0) is true, so the waiting case has
-    // to be recognised before any coercion or a round with no window yet would
-    // be armed with a zero length one and never acknowledged.
-    const raw = payload.remainingMs;
-    if (raw === null || raw === undefined || !Number.isFinite(Number(raw))) {
-      // The server has not started the clock yet: it is still waiting for both
-      // players to say they can see this round, so there is nothing to count.
-      match.deadlineLeftMs = null;
-      match.deadlineArmedAt = null;
-      if (els.roleTimer) els.roleTimer.classList.remove("is-time-warning");
-      return;
-    }
-    // performance.now() is monotonic, so a wall clock change on the device can
-    // neither stretch nor stall the countdown. Nothing here ever compares our
-    // clock to the server's.
-    match.deadlineLeftMs = Number(raw);
-    match.deadlineArmedAt = performance.now();
-    els.roleTimer?.classList.remove("is-time-warning");
-  }
-
-  // The server holds the round's clock until every player confirms they can see
-  // the round, so a slow page load never eats somebody's turn. Two gates have to
-  // open first: the round has been drawn, and the loading screen is actually
-  // gone. Without the second gate we would acknowledge from behind the loading
-  // animation and hand the other player a shorter window than we get.
-  function noteRoundDrawn() {
-    if (loadingScreenDone) sendRoundAck();
-  }
-
-  function sendRoundAck() {
-    const match = state.match;
-    if (!state.realtime || !match || match.phase !== "aim") return;
-    if (match.deadlineLeftMs !== null && match.deadlineLeftMs !== undefined) return;
-    if (ackedRound === match.round) return;
-    window.PenaltiShared?.emitWithAck?.("round:ack", { round: match.round })
-      .then((response) => {
-        // Latch only once the server has it. Latching before the send would make
-        // a dropped or timed-out ack permanent for the round, leaving this
-        // client on the acknowledgement cap with no way to retry.
-        if (!response?.ok) return;
-        ackedRound = match.round;
-        // Whoever acknowledged last gets the authoritative timing in the reply
-        // instead of waiting for the broadcast, so the countdown starts on the
-        // same tick the server did.
-        if (!response.ignored) armRoundCountdown(response);
-      })
-      .catch(() => { ackedRound = 0; });
-  }
+  // armRoundCountdown, noteRoundDrawn and sendRoundAck all lived here. They
+  // armed the mirror of the server's round window, latched the round:ack, and
+  // started a 100ms interval to repaint the countdown. All of that went away
+  // with the window. What is left to say "we are still waiting" is the confirm
+  // button, which reads OYUNCU BEKLENİYOR once you have sent, and the opponent
+  // status line, which reads Rakip hazır once they have.
 
   // True while the other player is disconnected and can still come back, which
   // is the window the reconnect card is offering. publicPlayer() carries id as
@@ -1077,51 +977,15 @@
     match.userConfirmed = false;
     match.botConfirmed = false;
     match.startedAt = Date.now();
-    // Keep the reconnect card up while the opponent is still gone. The server no
-    // longer sweeps a round whose opponent is disconnected, so this round is
-    // waiting rather than playing on without them, and closing the card here
-    // would throw away the countdown and the manual reconnect button.
+    // Keep the reconnect card up while the opponent is still gone, which is
+    // exactly how long this round stays open now: it waits for them. Closing the
+    // card here would throw away the manual reconnect button.
     if (!opponentIsGone()) closeOpponentLeftCard();
-    if (Object.keys(payload).length) armRoundCountdown(payload);
-    // The local demo match has no server deadline to mirror, so it shows a
-    // dash rather than inventing a countdown that means nothing.
-    else if (match.deadlineLeftMs === undefined) {
-      match.deadlineLeftMs = null;
-      match.deadlineArmedAt = null;
-    }
     resetPitchVisuals();
     renderMatch();
-    noteRoundDrawn();
     const status = userIsStriker() ? "Rakip kaleyi savunuyor…" : "Rakip şutunu hazırlıyor…";
     els.opponentStatusText.textContent = status;
     els.statusPulse.classList.remove("is-ready");
-    if (roundTimer) window.clearInterval(roundTimer);
-    roundTimer = window.setInterval(updateRoundTimer, 100);
-  }
-
-  function updateRoundTimer() {
-    const match = state.match;
-    if (!match || match.phase === "result" || match.phase === "resolving" || match.phase === "finished") {
-      if (els.roleTimer) els.roleTimer.textContent = "—";
-      return;
-    }
-    // The server owns the deadline. This is only a mirror of it: when it runs
-    // out the server fills in the target, it does not cancel the round.
-    if (match.deadlineLeftMs === null || match.deadlineLeftMs === undefined) {
-      // No window yet. In a real match that means the server is still waiting
-      // for both players to see the round; in the local demo there is no server
-      // clock at all and a dash is the honest thing to show.
-      if (els.roleTimer) els.roleTimer.textContent = state.realtime ? "··" : "—";
-      return;
-    }
-    const left = Math.max(0, match.deadlineLeftMs - (performance.now() - (match.deadlineArmedAt ?? performance.now())));
-    const remaining = Math.ceil(left / 1000);
-    if (els.roleTimer) {
-      els.roleTimer.textContent = left > 0
-        ? `00:${String(remaining).padStart(2, "0")}`
-        : "00:00";
-      els.roleTimer.classList.toggle("is-time-warning", left <= 500);
-    }
   }
 
   function pulseScore(element) {
@@ -1532,9 +1396,7 @@
     state.resultAction = action;
     els.resultCard.className = `result-card result-card--${result}${result === "goal" && !userStriker ? " result-card--conceded" : ""}`;
     els.resultIcon.innerHTML = materialIcon(icon);
-    els.resultEyebrow.textContent = match.autoPicked?.length
-      ? `SÜRE DOLDU · ${match.autoPicked.length > 1 ? "İKİ HAML DE" : "OTOMATİK SEÇİLDİ"}`
-      : match.suddenDeath ? "ALTIN PENALTI" : "VURUŞ SONU";
+    els.resultEyebrow.textContent = match.suddenDeath ? "ALTIN PENALTI" : "VURUŞ SONU";
     els.resultTitle.textContent = title;
     els.resultMessage.textContent = message;
     els.resultScore.textContent = `SEN ${match.score[0]} – ${match.score[1]} RAKİP`;
