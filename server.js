@@ -104,40 +104,56 @@ export const GOAL_GRID = 3;
 // Difficulty dial. A shot is saved when the Euclidean distance between the
 // striker's point and the keeper's point is at most this radius, both in
 // normalised 0-1 goal space. Measured on 2M random pairs, shot and keeper both
-// uniform on the unit square, seeded so the figures reproduce:
+// uniform on the unit square, seeded so the figures reproduce, and cross
+// checked against a numerical integral of the disk-square overlap which agrees
+// to within 0.05pp:
 //
 //   r      overall   centre third   edge midpoint   corner
-//   0.52     51.1%       75.5%         55.4%      40.7%   <- was
-//   0.47     44.1%       65.2%         47.9%      35.1%   <- now
+//   0.52     51.1%       75.5%         55.4%      40.7%   <- original
+//   0.47     44.1%       65.2%         47.9%      35.1%
+//   0.44     40.0%       58.5%         43.3%      31.9%
+//   0.40     34.4%       49.4%         37.2%      27.9%   <- now
 //
 // pi*r^2 is not the answer here and never was: it only holds while the disk
 // fits inside the square. At r = 0.52 it claims 85% and the real figure is
 // 51%, because the part of the disk hanging over an edge can never be reached
-// by a target. The radius that actually yields an even 50% is 0.5121, not the
+// by a target. The radius that actually yields an even 50% is 0.512, not the
 // 0.5207 an earlier version of this comment claimed.
 //
 // Aim position matters more than the overall figure suggests. Measured for a
 // shot aimed at exactly one point, keeper uniform, 4000x4000 grid:
 //
-//   point              r=0.52   r=0.47
-//   dead centre        83.4%    69.4%
-//   edge midpoint      42.1%    34.7%
-//   corner             21.2%    17.3%
+//   point              r=0.52   r=0.47   r=0.44   r=0.40
+//   dead centre        83.4%    69.4%    60.8%    50.3%
+//   edge midpoint      42.1%    34.7%    30.4%    25.1%
+//   corner             21.2%    17.3%    15.2%    12.6%
 //
 // Note the two tables answer different questions and neither is a correction
 // of the other: the first averages over every shot the striker could pick, the
 // second fixes the shot at one spot. An earlier version of this comment quoted
 // the second kind of number without saying so.
 //
-// Dead centre is close to a guaranteed save, so the useful places to shoot are
-// the edges and above all the corners. 0.52 was reduced to 0.47 because the
-// keeper read as saving from far too wide an area, and dead centre was winning
-// seven shots in eight.
+// The radius is one scalar, so it cannot be tuned per corner. What a smaller
+// radius does for the corners is lower the floor, and at 0.40 a corner is worth
+// only an eighth of saves while dead centre is still half, which is what makes
+// aiming feel like a real decision rather than a formality. The two steps
+// below are measured too, in case playtesting keeps going in the same
+// direction:
+//
+//   r      overall   centre third   corner    dead centre   corner point
+//   0.35     27.8%       38.3%      23.1%       38.5%         9.6%
+//   0.30     21.4%       28.1%      18.4%       28.3%         7.1%
+//
+// The radius has come down 0.52 -> 0.47 -> 0.44 -> 0.40 across three rounds of
+// playtesting, every one of them for the same reason: the keeper read as
+// saving from too wide an area, dead centre above all, and the corners were
+// still being reached too often. Nothing else in the game reads this constant,
+// so each of those rounds was a one-line change.
 //
 // The geometry is symmetric, so neither role has an advantage. Checked by
 // comparing each cell against its reflection: the largest gap is 0.6pp over
 // 400k pairs, which is sampling noise.
-export const DIVE_RADIUS = 0.47;
+export const DIVE_RADIUS = 0.40;
 
 // Centre of a 3x3 goal cell, as { x, y } in 0-1 goal space.
 export function cellCenter(zone) {
