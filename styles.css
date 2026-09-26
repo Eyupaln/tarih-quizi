@@ -1567,37 +1567,93 @@ body.is-loading {
 .goal-net span:nth-child(4) { left: 66%; }
 .goal-net span:nth-child(5) { left: 83%; }
 
-.target-grid {
+/* Continuous aiming surface. Its bounding box is the canonical 0-1 goal
+   space: pointer coordinates are normalised against this rect, not the
+   viewport, so two different phones agree on where a shot is. */
+.aim-surface {
   position: absolute;
-  z-index: 2;
-  inset: 7px 6px 5px;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(3, 1fr);
-  opacity: 0.75;
+  z-index: 4;
+  inset: 0;
+  border-radius: 3px 3px 0 0;
+  outline: none;
   pointer-events: auto;
+  touch-action: none;
+  cursor: crosshair;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.target-grid button {
-  position: relative;
-  border: 1px solid rgba(199, 255, 237, 0.11);
-  border-radius: 5px;
-  background: transparent;
-  cursor: pointer;
-  transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+.aim-surface:focus-visible {
+  box-shadow: inset 0 0 0 2px rgba(0, 255, 102, 0.55);
 }
 
-.target-grid button:hover,
-.target-grid button.is-selected {
-  border-color: rgba(0, 255, 102, 0.8);
-  background: rgba(0, 255, 102, 0.19);
-  box-shadow: inset 0 0 15px rgba(0, 255, 102, 0.12), 0 0 12px rgba(0, 255, 102, 0.15);
+.aim-guide {
+  position: absolute;
+  inset: 0;
+  opacity: 0.5;
+  pointer-events: none;
+  background-image:
+    linear-gradient(90deg, transparent 33.2%, rgba(199, 255, 237, 0.14) 33.2%, rgba(199, 255, 237, 0.14) 33.5%, transparent 33.5%, transparent 66.4%, rgba(199, 255, 237, 0.14) 66.4%, rgba(199, 255, 237, 0.14) 66.7%, transparent 66.7%),
+    linear-gradient(0deg, transparent 33.2%, rgba(199, 255, 237, 0.14) 33.2%, rgba(199, 255, 237, 0.14) 33.5%, transparent 33.5%, transparent 66.4%, rgba(199, 255, 237, 0.14) 66.4%, rgba(199, 255, 237, 0.14) 66.7%, transparent 66.7%);
 }
 
-.target-grid button.is-miss-target {
-  border-color: rgba(255, 109, 0, 0.8);
-  background: rgba(255, 109, 0, 0.18);
-  box-shadow: inset 0 0 15px rgba(255, 109, 0, 0.12);
+.aim-marker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.aim-marker__ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 42px;
+  height: 42px;
+  border: 2px solid rgba(0, 255, 102, 0.85);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 12px rgba(0, 255, 102, 0.4), inset 0 0 10px rgba(0, 255, 102, 0.18);
+  animation: aimPulse 1.5s ease-in-out infinite;
+}
+
+.aim-marker__dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #0bff66;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 10px rgba(0, 255, 102, 0.9);
+}
+
+.aim-marker.is-confirmed {
+  opacity: 0.65;
+}
+
+.aim-marker.is-confirmed .aim-marker__ring {
+  border-color: rgba(245, 247, 250, 0.8);
+  box-shadow: 0 0 12px rgba(245, 247, 250, 0.4);
+  animation: none;
+}
+
+.aim-marker.is-confirmed .aim-marker__dot {
+  background: #f5f7fa;
+}
+
+@keyframes aimPulse {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.12);
+    opacity: 1;
+  }
 }
 
 .keeper {
@@ -1829,11 +1885,14 @@ body.is-loading {
   border-color: rgba(255, 183, 115, 0.72);
 }
 
-.pitch--keeper .target-grid button:hover,
-.pitch--keeper .target-grid button.is-selected {
-  border-color: rgba(255, 138, 61, 0.86);
-  background: rgba(255, 109, 0, 0.2);
-  box-shadow: inset 0 0 15px rgba(255, 109, 0, 0.13), 0 0 12px rgba(255, 109, 0, 0.18);
+.pitch--keeper .aim-marker__ring {
+  border-color: rgba(255, 138, 61, 0.9);
+  box-shadow: 0 0 12px rgba(255, 109, 0, 0.42), inset 0 0 10px rgba(255, 109, 0, 0.18);
+}
+
+.pitch--keeper .aim-marker__dot {
+  background: #ff8a3d;
+  box-shadow: 0 0 10px rgba(255, 109, 0, 0.9);
 }
 
 .pitch--keeper .ball-handle {

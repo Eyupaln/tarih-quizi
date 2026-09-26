@@ -184,16 +184,13 @@
               <div class="goal-net" id="goalNet">
                 <span></span><span></span><span></span><span></span><span></span><span></span>
               </div>
-              <div class="target-grid" id="targetGrid" aria-label="Hedef alanı">
-                <button type="button" data-cell="0" aria-label="Sol üst"></button>
-                <button type="button" data-cell="1" aria-label="Orta üst"></button>
-                <button type="button" data-cell="2" aria-label="Sağ üst"></button>
-                <button type="button" data-cell="3" aria-label="Sol orta"></button>
-                <button type="button" data-cell="4" aria-label="Orta orta"></button>
-                <button type="button" data-cell="5" aria-label="Sağ orta"></button>
-                <button type="button" data-cell="6" aria-label="Sol alt"></button>
-                <button type="button" data-cell="7" aria-label="Orta alt"></button>
-                <button type="button" data-cell="8" aria-label="Sağ alt"></button>
+              <div class="aim-surface" id="aimSurface" tabindex="0" role="application"
+                aria-label="Hedef alanı. Dokunarak veya ok tuşlarıyla hedef seç.">
+                <div class="aim-guide" aria-hidden="true"></div>
+                <div class="aim-marker" id="aimMarker" hidden aria-hidden="true">
+                  <span class="aim-marker__ring"></span>
+                  <span class="aim-marker__dot"></span>
+                </div>
               </div>
             </div>
             <div class="keeper" id="keeper" aria-hidden="true">

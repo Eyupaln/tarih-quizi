@@ -56,7 +56,8 @@
     roleTimer: $("#roleTimer"),
     pitch: $("#pitch"),
     goalFrame: $("#goalFrame"),
-    targetGrid: $("#targetGrid"),
+    aimSurface: $("#aimSurface"),
+    aimMarker: $("#aimMarker"),
     keeper: $("#keeper"),
     trajectory: $("#trajectory"),
     trajectoryPath: $("#trajectoryPath"),
@@ -775,23 +776,17 @@
   async function confirmRealtimeUserAction() {
     const match = state.match;
     if (!match || match.phase !== "aim" || match.userConfirmed) return;
-    const zone = Number(match.userAim?.cell);
-    if (!Number.isInteger(zone) || zone < 0 || zone > 8) {
+    const x = Number(match.userAim?.x);
+    const y = Number(match.userAim?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
       showToast("Önce hedef bölge seç.", "orange");
-      return;
-    }
-    // The 9 buttons still drive the UI; the wire format is now the continuous
-    // goal position of the chosen cell.
-    const target = window.PenaltiShared.goalCellCenter(zone);
-    if (!target) {
-      showToast("Geçerli bir hedef bölge seç.", "orange");
       return;
     }
     match.userConfirmed = true;
     renderMatch();
     const eventName = match.youRole === "forvet" ? "shot:submit" : "save:submit";
     try {
-      const response = await window.PenaltiShared.emitWithAck(eventName, { x: target.x, y: target.y });
+      const response = await window.PenaltiShared.emitWithAck(eventName, { x, y });
       if (!response?.ok) throw new Error(response?.error?.message || "Seçimin gönderilemedi.");
     } catch (error) {
       match.userConfirmed = false;
@@ -1047,6 +1042,7 @@
     els.gestureHint.classList.toggle("is-hidden", hasAim || match.userConfirmed);
     els.ballHandle.classList.toggle("is-confirmed", match.userConfirmed);
     els.ballHandle.setAttribute("aria-valuetext", match.userConfirmed ? "Vuruş kilitlendi" : "Vuruş butonunu kullan");
+    renderAimMarker(match.userAim);
 
     const youRoleLabel = $(".score-player--you small");
     const opponentRoleLabel = $(".score-player--opponent small");
@@ -1127,13 +1123,13 @@
     els.trajectoryPath.setAttribute("d", "M180 365 Q180 250 180 125");
     els.trajectoryEnd.setAttribute("cx", "180");
     els.trajectoryEnd.setAttribute("cy", "125");
-    $$("#targetGrid button").forEach((button) => button.classList.remove("is-selected", "is-miss-target"));
+    renderAimMarker(null);
     els.gestureHint.classList.remove("is-hidden");
   }
 
   function getAimPoint(aim) {
     const pitchRect = els.pitch.getBoundingClientRect();
-    const goalRect = els.goalFrame.getBoundingClientRect();
+    const goalRect = goalRectForAim();
     if (!aim) return { x: pitchRect.width / 2, y: pitchRect.height * 0.29 };
     if (aim.type === "miss") {
       return {
@@ -1141,6 +1137,15 @@
         y: Math.max(10, Math.min(pitchRect.height - 10, (aim.y || 0.15) * pitchRect.height)),
       };
     }
+    // Continuous aim from the local player.
+    if (aim.x !== undefined && aim.y !== undefined) {
+      return {
+        x: goalRect.left - pitchRect.left + aim.x * goalRect.width,
+        y: goalRect.top - pitchRect.top + aim.y * goalRect.height,
+      };
+    }
+    // Remote aim still arrives as a discrete cell, derived by the server's
+    // nearestCell(), so this path is unchanged from before.
     const cell = Math.max(0, Math.min(8, Number(aim.cell) || 0));
     const column = cell % 3;
     const row = Math.floor(cell / 3);
@@ -1163,18 +1168,58 @@
     els.trajectory.style.opacity = aim ? "1" : "0.45";
   }
 
+  // The aiming surface's rect is the canonical 0-1 goal box. Pointer input is
+  // normalised against it, never against the viewport, so two phones of
+  // different sizes agree on where a shot is.
+  function goalRectForAim() {
+    return (els.aimSurface || els.goalFrame).getBoundingClientRect();
+  }
+
+  function clamp01(value) {
+    if (!Number.isFinite(value)) return 0;
+    if (value < 0) return 0;
+    if (value > 1) return 1;
+    return value;
+  }
+
+  // Pointer (mouse, touch or pen) to a clamped goal-space point.
+  function goalPointFromPointer(event) {
+    const rect = goalRectForAim();
+    if (!rect.width || !rect.height) return null;
+    return {
+      x: clamp01((event.clientX - rect.left) / rect.width),
+      y: clamp01((event.clientY - rect.top) / rect.height),
+    };
+  }
+
+  function renderAimMarker(aim) {
+    if (!els.aimMarker) return;
+    const point = aim && aim.type !== "miss" ? aim : null;
+    if (!point || point.x === undefined) {
+      els.aimMarker.hidden = true;
+      return;
+    }
+    els.aimMarker.hidden = false;
+    els.aimMarker.style.left = `${(point.x * 100).toFixed(3)}%`;
+    els.aimMarker.style.top = `${(point.y * 100).toFixed(3)}%`;
+    els.aimMarker.classList.toggle("is-confirmed", Boolean(state.match?.userConfirmed));
+  }
+
   function setAim(aim) {
     const match = state.match;
     if (!match || match.phase !== "aim" || match.userConfirmed) return;
     match.userAim = aim;
-    $$("#targetGrid button").forEach((button) => {
-      const selected = aim.type === "goal" && Number(button.dataset.cell) === Number(aim.cell);
-      button.classList.toggle("is-selected", selected);
-      button.classList.remove("is-miss-target");
-    });
+    renderAimMarker(aim);
     els.pitchBadge.classList.toggle("is-miss", aim.type === "miss");
-    els.pitchBadge.textContent = aim.type === "miss" ? "KALE DIŞI!" : userIsStriker() ? "HEDEF SEÇİLDİ" : "DİVE NOKTASI";
-    els.ballHandle.setAttribute("aria-valuetext", aim.type === "miss" ? "Kale dışı hedef" : `Hedef ${Number(aim.cell) + 1}`);
+    els.pitchBadge.textContent = aim.type === "miss"
+      ? "KALE DIŞI!"
+      : userIsStriker() ? "HEDEF SEÇİLDİ" : "DİVE NOKTASI";
+    els.ballHandle.setAttribute(
+      "aria-valuetext",
+      aim.type === "miss"
+        ? "Kale dışı hedef"
+        : `Hedef yatay %${Math.round(aim.x * 100)}, dikey %${Math.round(aim.y * 100)}`,
+    );
     els.gestureHint.classList.add("is-hidden");
     updateTrajectory(aim);
     renderMatch();
@@ -1290,8 +1335,19 @@
   function setKeeperAnimation(aim) {
     els.keeper.className = "keeper";
     if (!aim || aim.type === "miss") return;
-    const column = Number(aim.cell) % 3;
-    const row = Math.floor(Number(aim.cell) / 3);
+    // Continuous aim maps onto the same nine dive directions by thirds, so at
+    // a cell centre the animation is identical to the discrete version.
+    let column;
+    let row;
+    if (aim.x !== undefined && aim.y !== undefined) {
+      const band = (value) => (value < 1 / 3 ? 0 : value > 2 / 3 ? 2 : 1);
+      column = band(aim.x);
+      row = band(aim.y);
+    } else {
+      const cell = Math.max(0, Math.min(8, Number(aim.cell) || 0));
+      column = cell % 3;
+      row = Math.floor(cell / 3);
+    }
     if (column === 0 && row === 0) els.keeper.classList.add("keeper--dive-high-left");
     else if (column === 2 && row === 0) els.keeper.classList.add("keeper--dive-high-right");
     else if (column === 0 && row === 2) els.keeper.classList.add("keeper--dive-low-left");
@@ -1831,9 +1887,50 @@
   els.leaveTournamentButton.addEventListener("click", leaveTournament);
   els.tournamentNextButton.addEventListener("click", tournamentNext);
   els.confirmButton.addEventListener("click", confirmUserAction);
-  els.targetGrid.addEventListener("click", (event) => {
-    const button = event.target.closest("button[data-cell]");
-    if (button) setAim({ type: "goal", cell: Number(button.dataset.cell) });
+
+  // ---- continuous aiming surface ----
+  // Pointer events cover mouse, touch and pen with one code path. Dragging
+  // refines the target; the shot is only locked by the confirm button.
+  let aimPointerActive = false;
+
+  function aimFromPointerEvent(event) {
+    const point = goalPointFromPointer(event);
+    if (!point) return;
+    setAim({ type: "goal", x: point.x, y: point.y });
+  }
+
+  els.aimSurface?.addEventListener("pointerdown", (event) => {
+    if (!state.match || state.match.phase !== "aim" || state.match.userConfirmed) return;
+    aimPointerActive = true;
+    els.aimSurface.setPointerCapture?.(event.pointerId);
+    aimFromPointerEvent(event);
+    event.preventDefault();
+  });
+
+  els.aimSurface?.addEventListener("pointermove", (event) => {
+    if (!aimPointerActive) return;
+    aimFromPointerEvent(event);
+    event.preventDefault();
+  });
+
+  const endAimPointer = (event) => {
+    if (!aimPointerActive) return;
+    aimPointerActive = false;
+    els.aimSurface?.releasePointerCapture?.(event.pointerId);
+  };
+  els.aimSurface?.addEventListener("pointerup", endAimPointer);
+  els.aimSurface?.addEventListener("pointercancel", endAimPointer);
+
+  // Keyboard access, replacing the nine focusable buttons.
+  els.aimSurface?.addEventListener("keydown", (event) => {
+    const nudge = { ArrowLeft: [-0.04, 0], ArrowRight: [0.04, 0], ArrowUp: [0, -0.04], ArrowDown: [0, 0.04] }[event.key];
+    if (!nudge) return;
+    event.preventDefault();
+    const current = state.match?.userAim;
+    const base = current && current.x !== undefined
+      ? { x: current.x, y: current.y }
+      : { x: 0.5, y: 0.5 };
+    setAim({ type: "goal", x: clamp01(base.x + nudge[0]), y: clamp01(base.y + nudge[1]) });
   });
   els.resultPrimaryButton.addEventListener("click", handleResultPrimary);
   els.resultSecondaryButton.addEventListener("click", openExitConfirmation);
