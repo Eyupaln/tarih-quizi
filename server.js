@@ -101,19 +101,43 @@ function normalizeZone(value) {
 // viewport, because the two players are on different devices).
 export const GOAL_GRID = 3;
 
-// Difficulty dial. Measured on 400k random (shot, keeper) pairs in a unit
-// square: 0.12 -> ~4% saves, 0.40 -> ~34%, 0.52 -> ~50%.
+// Difficulty dial. A shot is saved when the Euclidean distance between the
+// striker's point and the keeper's point is at most this radius, both in
+// normalised 0-1 goal space. Measured on 2M random pairs, shot and keeper both
+// uniform on the unit square, seeded so the figures reproduce:
 //
-// Note pi*r^2 only holds while the circle fits inside the square. Past 0.5 it
-// spills over the edges, and that area can never be reached by a real target,
-// so the naive estimate is badly wrong here: pi*0.52^2 claims 85%. The radius
-// that actually yields 50% is 0.5207, which is what this is rounded from.
+//   r      overall   centre third   edge midpoint   corner
+//   0.52     51.1%       75.5%         55.4%      40.7%   <- was
+//   0.47     44.1%       65.2%         47.9%      35.1%   <- now
 //
-// Where you aim decides a lot. Save rate by shot position: centre 82.9%, edge
-// midpoint 43.3%, corner 23.4%. The centre is close to a guaranteed save, so
-// the useful choices are the edges and the corners. The geometry is symmetric,
-// so neither role has an advantage.
-export const DIVE_RADIUS = 0.52;
+// pi*r^2 is not the answer here and never was: it only holds while the disk
+// fits inside the square. At r = 0.52 it claims 85% and the real figure is
+// 51%, because the part of the disk hanging over an edge can never be reached
+// by a target. The radius that actually yields an even 50% is 0.5121, not the
+// 0.5207 an earlier version of this comment claimed.
+//
+// Aim position matters more than the overall figure suggests. Measured for a
+// shot aimed at exactly one point, keeper uniform, 4000x4000 grid:
+//
+//   point              r=0.52   r=0.47
+//   dead centre        83.4%    69.4%
+//   edge midpoint      42.1%    34.7%
+//   corner             21.2%    17.3%
+//
+// Note the two tables answer different questions and neither is a correction
+// of the other: the first averages over every shot the striker could pick, the
+// second fixes the shot at one spot. An earlier version of this comment quoted
+// the second kind of number without saying so.
+//
+// Dead centre is close to a guaranteed save, so the useful places to shoot are
+// the edges and above all the corners. 0.52 was reduced to 0.47 because the
+// keeper read as saving from far too wide an area, and dead centre was winning
+// seven shots in eight.
+//
+// The geometry is symmetric, so neither role has an advantage. Checked by
+// comparing each cell against its reflection: the largest gap is 0.6pp over
+// 400k pairs, which is sampling noise.
+export const DIVE_RADIUS = 0.47;
 
 // Centre of a 3x3 goal cell, as { x, y } in 0-1 goal space.
 export function cellCenter(zone) {
