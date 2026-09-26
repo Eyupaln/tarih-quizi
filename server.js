@@ -175,6 +175,9 @@ function finishAfterPlayerRemoval(room, player) {
     reason: "opponent_gone",
     canReconnect: false,
     graceMs: 0,
+    score: { ...room.match.score },
+    round: room.match.round,
+    goldenPenalty: room.match.goldenPenalty,
     room: publicRoom(room),
   });
   io.to(room.code).emit("match:finished", {
@@ -201,6 +204,7 @@ function removePlayer(room, player, reason = "left") {
     playerId: player.id,
     nickname: player.nickname,
     reason,
+    score: { ...(room.match?.score || { player1: 0, player2: 0 }) },
     room: publicRoom(room),
   });
   emitRoomState(room);
@@ -239,6 +243,9 @@ function removePlayerFromRoom(socket, reason = "left", explicit = true) {
       reason,
       canReconnect: true,
       graceMs: DISCONNECT_GRACE_MS,
+      score: { ...(room.match?.score || { player1: 0, player2: 0 }) },
+      round: room.match?.round,
+      goldenPenalty: room.match?.goldenPenalty,
       room: publicRoom(room),
     });
     scheduleDisconnectCleanup(room, player);

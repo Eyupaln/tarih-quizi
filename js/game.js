@@ -112,6 +112,9 @@
     opponentLeftMessage: $("#opponentLeftMessage"),
     opponentLeftTimer: $("#opponentLeftTimer"),
     opponentLeftCountdown: $("#opponentLeftCountdown"),
+    opponentLeftScore: $("#opponentLeftScore"),
+    opponentLeftYouScore: $("#opponentLeftYouScore"),
+    opponentLeftRivalScore: $("#opponentLeftRivalScore"),
     opponentLeftWaitButton: $("#opponentLeftWaitButton"),
     opponentLeftLobbyButton: $("#opponentLeftLobbyButton"),
     exitConfirmBackdrop: $("#exitConfirmBackdrop"),
@@ -1435,6 +1438,7 @@
   // ---- opponent left: full screen state instead of a toast the player can miss ----
   let opponentLeftTimer = null;
   let opponentLeftDeadline = 0;
+  let lastOpponentLeftScore = null;
 
   function clearOpponentLeftCountdown() {
     if (opponentLeftTimer) window.clearInterval(opponentLeftTimer);
@@ -1451,18 +1455,33 @@
     if (!els.opponentLeftOverlay) return;
     const canReconnect = payload.canReconnect !== false;
     els.opponentLeftEyebrow.textContent = canReconnect ? "BAĞLANTI KESİLDİ" : "RAKİP AYRILDI";
-    els.opponentLeftTitle.textContent = canReconnect ? "Rakip ayrıldı" : "Maç sonlandı";
+    els.opponentLeftTitle.textContent = canReconnect ? "Rakip ayrıldı" : "Rakip ayrıldı";
     els.opponentLeftMessage.textContent = payload.message
       || (canReconnect ? "Rakibin bağlantısı koptu." : "Rakip odayı terk etti.");
     els.opponentLeftIcon.textContent = canReconnect ? "wifi_off" : "person_off";
-    els.opponentLeftLobbyButton.textContent = canReconnect ? "LOBİYE DÖN" : "ANA MENÜ";
+    els.opponentLeftLobbyButton.textContent = "LOBİYE DÖN";
+
+    // Current score, so the remaining player knows where the duel stands.
+    // Later events (such as room:playerLeft) may not carry it, so keep the
+    // last known score rather than blanking the card.
+    const score = payload.score || lastOpponentLeftScore;
+    if (score) {
+      lastOpponentLeftScore = score;
+      const youIndex = roomIndexOf(window.PenaltiShared.getPlayerToken());
+      els.opponentLeftScore.hidden = false;
+      els.opponentLeftYouScore.textContent = String(youIndex === 1 ? score.player2 : score.player1);
+      els.opponentLeftRivalScore.textContent = String(youIndex === 1 ? score.player1 : score.player2);
+    } else {
+      els.opponentLeftScore.hidden = true;
+    }
 
     clearOpponentLeftCountdown();
     const graceMs = Number(payload.graceMs) || 0;
+    els.opponentLeftWaitButton.hidden = !canReconnect;
     if (canReconnect && graceMs > 0) {
       els.opponentLeftTimer.hidden = false;
-      els.opponentLeftWaitButton.disabled = true;
-      els.opponentLeftWaitButton.innerHTML = `BEKLEMEDE KAL ${materialIcon("hourglass_top")}`;
+      els.opponentLeftWaitButton.disabled = false;
+      els.opponentLeftWaitButton.innerHTML = `YENİDEN BAĞLAN ${materialIcon("wifi_tethering")}`;
       opponentLeftDeadline = Date.now() + graceMs;
       const tick = () => {
         const left = Math.max(0, Math.ceil((opponentLeftDeadline - Date.now()) / 1000));
@@ -1472,11 +1491,16 @@
       tick();
       opponentLeftTimer = window.setInterval(tick, 250);
     } else {
+      // Grace period is over: no reconnect button, only the way out.
       els.opponentLeftTimer.hidden = true;
-      els.opponentLeftWaitButton.disabled = false;
-      els.opponentLeftWaitButton.innerHTML = `DEVAM ET ${materialIcon("arrow_forward")}`;
     }
     els.opponentLeftOverlay.hidden = false;
+  }
+
+  function roomIndexOf(playerId) {
+    const players = state.room?.players || window.PenaltiShared.getRoomState()?.players || [];
+    const index = players.findIndex((player) => player.id === playerId);
+    return index < 0 ? 0 : index;
   }
 
   function exitRealtime() {
@@ -1772,21 +1796,29 @@
   els.exitConfirmCancel?.addEventListener("click", closeExitConfirmation);
   els.exitConfirmConfirm?.addEventListener("click", confirmExitAction);
   els.exitConfirmBackdrop?.addEventListener("click", closeExitConfirmation);
-  els.opponentLeftWaitButton?.addEventListener("click", () => {
-    closeOpponentLeftCard();
-    if (state.match) {
-      state.match.phase = "aim";
-      els.opponentStatusText.textContent = "Rakip bekleniyor…";
-      renderMatch();
+  els.opponentLeftWaitButton?.addEventListener("click", async () => {
+    const button = els.opponentLeftWaitButton;
+    if (!button || button.disabled) return;
+    button.disabled = true;
+    button.innerHTML = `BAĞLANILIYOR… ${materialIcon("hourglass_top")}`;
+    // Re-attach to the room and re-sync, then keep waiting for the opponent.
+    const response = await rejoinRealtimeRoom();
+    const back = response?.room?.players?.find((player) => player.id !== window.PenaltiShared.getPlayerToken());
+    if (back && back.connected !== false) {
+      closeOpponentLeftCard();
+      if (state.match) {
+        state.match.phase = "aim";
+        els.opponentStatusText.textContent = "Rakip yeniden bağlandı.";
+        renderMatch();
+      }
+      return;
     }
+    button.disabled = false;
+    button.innerHTML = `YENİDEN BAĞLAN ${materialIcon("wifi_tethering")}`;
+    showToast("Rakip hâlâ bağlı değil.", "orange");
   });
   els.opponentLeftLobbyButton?.addEventListener("click", () => {
     closeOpponentLeftCard();
-    if (realtimeFinishedShown || state.match?.phase === "finished") {
-      window.PenaltiShared?.leaveRoom?.();
-      window.location.href = "index.html";
-      return;
-    }
     window.location.href = "lobby.html";
   });
   els.leaveTournamentButton.addEventListener("click", leaveTournament);

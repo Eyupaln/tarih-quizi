@@ -2876,6 +2876,43 @@ body.is-loading {
   line-height: 1.6;
 }
 
+.opponent-left-score {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 11px 12px;
+  border: 1px solid rgba(245, 247, 250, 0.12);
+  border-radius: 10px;
+  background: rgba(11, 12, 16, 0.45);
+}
+
+.opponent-left-score > div {
+  display: grid;
+  gap: 2px;
+  min-width: 58px;
+}
+
+.opponent-left-score strong {
+  color: #f5f7fa;
+  font-family: var(--font-display);
+  font-size: 26px;
+  line-height: 1;
+}
+
+.opponent-left-score span {
+  color: #8e9daa;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.opponent-left-score b {
+  color: #64717d;
+  font-size: 18px;
+}
+
 .opponent-left-timer {
   display: flex;
   align-items: center;
