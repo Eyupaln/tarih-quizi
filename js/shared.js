@@ -200,6 +200,22 @@
     return String(value ?? "").toUpperCase().replace(/[^2-9A-HJ-NP-Z]/g, "").slice(0, 6);
   }
 
+  // Centre of a 3x3 goal cell, in normalised 0-1 goal space.
+  // Mirrors cellCenter() in server.js, which is the source of truth. The two
+  // runtimes cannot share a module here, so a test checks them against each
+  // other.
+  const GOAL_GRID = 3;
+
+  function goalCellCenter(zone) {
+    const index = Number(zone);
+    if (!Number.isInteger(index) || index < 0 || index >= GOAL_GRID * GOAL_GRID) return null;
+    const step = 1 / GOAL_GRID;
+    return {
+      x: ((index % GOAL_GRID) + 0.5) * step,
+      y: (Math.floor(index / GOAL_GRID) + 0.5) * step,
+    };
+  }
+
   function getRoomState() {
     try {
       const value = readStorage(STORAGE_KEYS.roomState, null);
@@ -597,6 +613,7 @@
     leaveRoom,
     randomRoomCode,
     normalizeRoomCode,
+    goalCellCenter,
     getRoomState,
     setRoomState,
     clearRoomState,

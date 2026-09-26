@@ -102,6 +102,44 @@ export function isSaved(forvetTarget, kaleciTarget, radius = DIVE_RADIUS) {
   return goalDistance(forvetTarget, kaleciTarget) <= radius;
 }
 
+function clamp01(value) {
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
+
+// Nearest 3x3 cell for a continuous goal point, so the discrete value the UI
+// and animation still rely on can be recovered from a continuous target.
+export function nearestCell(target) {
+  if (!target) return null;
+  const toIndex = (value) => Math.min(
+    GOAL_GRID - 1,
+    Math.max(0, Math.round(value * GOAL_GRID - 0.5)),
+  );
+  return toIndex(target.y) * GOAL_GRID + toIndex(target.x);
+}
+
+// Single internal target format: { x, y, zone } in normalised goal space.
+// Accepts the continuous { x, y } payload and, for backwards compatibility
+// with clients that have not been redeployed yet, the old { zone } payload.
+export function normalizeTarget(payload) {
+  if (!payload || typeof payload !== "object") return null;
+
+  if (payload.x !== undefined || payload.y !== undefined) {
+    const x = Number(payload.x);
+    const y = Number(payload.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const target = { x: clamp01(x), y: clamp01(y) };
+    return { x: target.x, y: target.y, zone: nearestCell(target) };
+  }
+
+  const zone = normalizeZone(payload.zone);
+  if (zone === null) return null;
+  const center = cellCenter(zone);
+  if (!center) return null;
+  return { x: center.x, y: center.y, zone };
+}
+
 function createMatch() {
   return {
     round: 1,
@@ -374,17 +412,17 @@ function startMatch(room) {
 }
 
 function resolveRound(room) {
-  const forvetZone = room.pendingShots.forvet;
-  const kaleciZone = room.pendingShots.kaleci;
-  if (forvetZone === null || kaleciZone === null) return null;
+  const forvetTarget = room.pendingShots.forvet;
+  const kaleciTarget = room.pendingShots.kaleci;
+  if (forvetTarget === null || kaleciTarget === null) return null;
 
   const roles = rolesForRound(room);
   const forvet = room.players.find((player) => player.id === roles?.forvetId);
   const kaleci = room.players.find((player) => player.id === roles?.kaleciId);
   if (!forvet || !kaleci) return null;
 
-  const forvetTarget = cellCenter(forvetZone);
-  const kaleciTarget = cellCenter(kaleciZone);
+  const forvetZone = forvetTarget.zone;
+  const kaleciZone = kaleciTarget.zone;
   const result = isSaved(forvetTarget, kaleciTarget) ? "KURTARDI" : "GOL";
   if (result === "GOL") room.match.score[getScoreKey(room, forvet.id)] += 1;
   room.match.shots.forvet.push({ round: room.match.round, zone: forvetZone, result });
@@ -460,9 +498,9 @@ function handleShot(socket, kind, payload, ack) {
     emitError(socket, ack, "ROLE_NOT_ALLOWED", "Bu turda bu işlemi yapma sırası sende değil.");
     return;
   }
-  const zone = normalizeZone(payload?.zone);
-  if (zone === null) {
-    emitError(socket, ack, "INVALID_ZONE", "Geçerli bir hedef bölge seç.");
+  const target = normalizeTarget(payload);
+  if (!target) {
+    emitError(socket, ack, "INVALID_TARGET", "Geçerli bir hedef bölge seç.");
     return;
   }
   if (room.pendingShots[expectedRole] !== null) {
@@ -470,7 +508,7 @@ function handleShot(socket, kind, payload, ack) {
     return;
   }
 
-  room.pendingShots[expectedRole] = zone;
+  room.pendingShots[expectedRole] = target;
   socket.emit("shot:accepted", { role: expectedRole, round: room.match.round });
   io.to(room.code).emit("shot:waiting", {
     role: expectedRole,

@@ -780,11 +780,18 @@
       showToast("Önce hedef bölge seç.", "orange");
       return;
     }
+    // The 9 buttons still drive the UI; the wire format is now the continuous
+    // goal position of the chosen cell.
+    const target = window.PenaltiShared.goalCellCenter(zone);
+    if (!target) {
+      showToast("Geçerli bir hedef bölge seç.", "orange");
+      return;
+    }
     match.userConfirmed = true;
     renderMatch();
     const eventName = match.youRole === "forvet" ? "shot:submit" : "save:submit";
     try {
-      const response = await window.PenaltiShared.emitWithAck(eventName, { zone });
+      const response = await window.PenaltiShared.emitWithAck(eventName, { x: target.x, y: target.y });
       if (!response?.ok) throw new Error(response?.error?.message || "Seçimin gönderilemedi.");
     } catch (error) {
       match.userConfirmed = false;
