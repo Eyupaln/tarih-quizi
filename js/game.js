@@ -69,10 +69,6 @@
     opponentStatusAvatar: $("#opponentStatusAvatar"),
     opponentStatusText: $("#opponentStatusText"),
     statusPulse: $("#statusPulse"),
-    opponentActionButton: $("#opponentActionButton"),
-    opponentPanel: $("#opponentActionPanel"),
-    opponentTargetGrid: $("#opponentTargetGrid"),
-    opponentTargetLabel: $("#opponentTargetLabel"),
     instructionIcon: $("#instructionIcon"),
     actionTitle: $("#actionTitle"),
     actionSubtitle: $("#actionSubtitle"),
@@ -629,7 +625,6 @@
     };
     state.realtimeFinished = null;
     els.matchRoomLabel.textContent = `ODA · ${room.code || "----"}`;
-    if (els.opponentPanel) els.opponentPanel.hidden = true;
     setView("match");
     window.PenaltiShared?.stopMenuMusic?.();
     startCrowdAmbience();
@@ -1046,14 +1041,6 @@
         : `KURTAR ${materialIcon("arrow_forward")}`;
     els.confirmButton.classList.toggle("confirm-button--keeper", !striker);
     els.confirmButton.disabled = match.phase !== "aim" || match.userConfirmed || !match.userAim;
-    els.opponentTargetLabel.textContent = striker ? "RAKİP KALECİ HEDEFİ" : "RAKİP VURUŞ HEDEFİ";
-    renderOpponentAim();
-    els.opponentActionButton.innerHTML = match.botConfirmed
-      ? `RAKİP HAZIR ${materialIcon("check")}`
-      : striker
-        ? `RAKİP KURTAR ${materialIcon("arrow_forward")}`
-        : `RAKİP VURUŞ ${materialIcon("arrow_forward")}`;
-    els.opponentActionButton.disabled = match.phase !== "aim" || match.botConfirmed || !match.botAim;
     els.opponentStatusAvatar.innerHTML = materialIcon(opponent.avatar);
     els.opponentStatusText.textContent = match.userConfirmed && match.botConfirmed
       ? "İki oyuncu hazır!"
@@ -1159,42 +1146,6 @@
     updateTrajectory(aim);
     renderMatch();
     playTone(aim.type === "miss" ? 260 : 480, 0.045, "triangle");
-  }
-
-  function renderOpponentAim() {
-    const match = state.match;
-    if (!match || !els.opponentTargetGrid) return;
-    $$("button[data-cell]", els.opponentTargetGrid).forEach((button) => {
-      const selected = match.botAim?.type === "goal" && Number(button.dataset.cell) === Number(match.botAim.cell);
-      button.classList.toggle("is-selected", selected);
-      button.disabled = match.phase !== "aim" || match.botConfirmed;
-    });
-  }
-
-  function setOpponentAim(cell) {
-    const match = state.match;
-    if (!match || match.phase !== "aim" || match.botConfirmed) return;
-    match.botAim = { type: "goal", cell: Number(cell) };
-    renderMatch();
-    els.opponentActionButton.classList.add("has-selection");
-    playTone(390, 0.045, "triangle");
-  }
-
-  function confirmOpponentAction() {
-    const match = state.match;
-    if (!match || match.phase !== "aim" || match.botConfirmed) return;
-    if (!match.botAim) {
-      showToast("Rakip önce bir hedef seçmeli.", "orange");
-      return;
-    }
-    match.botConfirmed = true;
-    els.opponentStatusText.textContent = "İki oyuncu hazır!";
-    els.statusPulse.classList.add("is-ready");
-    els.opponentActionButton.textContent = "RAKİP HAZIR";
-    els.opponentActionButton.disabled = true;
-    playTone(640, 0.08, "triangle");
-    renderMatch();
-    maybeStartCountdown();
   }
 
   function confirmUserAction() {
@@ -1739,14 +1690,9 @@
   els.leaveTournamentButton.addEventListener("click", leaveTournament);
   els.tournamentNextButton.addEventListener("click", tournamentNext);
   els.confirmButton.addEventListener("click", confirmUserAction);
-  els.opponentActionButton.addEventListener("click", confirmOpponentAction);
   els.targetGrid.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-cell]");
     if (button) setAim({ type: "goal", cell: Number(button.dataset.cell) });
-  });
-  els.opponentTargetGrid.addEventListener("click", (event) => {
-    const button = event.target.closest("button[data-cell]");
-    if (button) setOpponentAim(Number(button.dataset.cell));
   });
   els.resultPrimaryButton.addEventListener("click", handleResultPrimary);
   els.resultSecondaryButton.addEventListener("click", openExitConfirmation);
