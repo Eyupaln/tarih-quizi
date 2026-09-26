@@ -105,6 +105,15 @@
     rulesBackdrop: $("#rulesBackdrop"),
     closeRulesButton: $("#closeRulesButton"),
     exitConfirmOverlay: $("#exitConfirmOverlay"),
+    opponentLeftOverlay: $("#opponentLeftOverlay"),
+    opponentLeftIcon: $("#opponentLeftIcon"),
+    opponentLeftEyebrow: $("#opponentLeftEyebrow"),
+    opponentLeftTitle: $("#opponentLeftTitle"),
+    opponentLeftMessage: $("#opponentLeftMessage"),
+    opponentLeftTimer: $("#opponentLeftTimer"),
+    opponentLeftCountdown: $("#opponentLeftCountdown"),
+    opponentLeftWaitButton: $("#opponentLeftWaitButton"),
+    opponentLeftLobbyButton: $("#opponentLeftLobbyButton"),
     exitConfirmBackdrop: $("#exitConfirmBackdrop"),
     exitConfirmCancel: $("#exitConfirmCancel"),
     exitConfirmConfirm: $("#exitConfirmConfirm"),
@@ -562,15 +571,8 @@
         showRealtimeFinished(payload);
       }
     });
-    shared.onSocket("opponent:disconnected", (payload) => {
-      if (payload?.message) {
-        if (state.match) {
-          state.match.phase = "waiting-opponent";
-          els.opponentStatusText.textContent = payload.message;
-        }
-        showToast(payload.message, "orange");
-      }
-    });
+    // opponent:disconnected is intentionally not handled here: opponent:left
+    // fires right after it and drives the full screen card.
     shared.onSocket("room:playerReconnected", (payload) => {
       if (!state.realtime) return;
       if (payload?.room) applyRealtimeRoom(payload.room);
@@ -579,12 +581,18 @@
         els.opponentStatusText.textContent = "Rakip yeniden bağlandı.";
         renderMatch();
       }
+      // They made it back before the grace period ran out: carry on.
+      closeOpponentLeftCard();
+      showToast("Rakip yeniden bağlandı.", "green");
+    });
+    shared.onSocket("opponent:left", (payload) => {
+      if (!state.realtime) return;
+      if (state.match && state.match.phase !== "finished") state.match.phase = "waiting-opponent";
+      showOpponentLeftCard(payload);
     });
     shared.onSocket("room:playerLeft", (payload) => {
-      if (payload?.message) {
-        if (state.match) els.opponentStatusText.textContent = payload.message;
-        showToast(payload.message, "orange");
-      }
+      if (!state.realtime) return;
+      showOpponentLeftCard({ ...payload, canReconnect: false, graceMs: 0 });
     });
     shared.onSocket("room:error", (payload) => {
       if (payload?.message) showToast(payload.message, "orange");
@@ -703,6 +711,7 @@
     const match = state.match;
     clearMatchTimers();
     stopCrowdAmbience();
+    closeOpponentLeftCard();
     updateRealtimeRound(payload);
     match.phase = "finished";
     hideOverlays();
@@ -926,6 +935,8 @@
     match.userConfirmed = false;
     match.botConfirmed = false;
     match.startedAt = Date.now();
+    closeOpponentLeftCard();
+    els.roleTimer?.classList.remove("is-time-warning");
     resetPitchVisuals();
     renderMatch();
     const status = userIsStriker() ? "Rakip kaleyi savunuyor…" : "Rakip şutunu hazırlıyor…";
@@ -944,7 +955,12 @@
     const elapsed = Math.floor((Date.now() - match.startedAt) / 1000);
     const remaining = Math.max(0, 10 - elapsed);
     if (els.roleTimer) els.roleTimer.textContent = `00:${String(remaining).padStart(2, "0")}`;
-    if (remaining === 0) els.roleTimer?.classList.add("is-time-warning");
+    if (remaining > 0) return;
+    els.roleTimer?.classList.add("is-time-warning");
+    // Stop the countdown so the auto pick only fires once.
+    if (roundTimer) window.clearInterval(roundTimer);
+    roundTimer = null;
+    if (state.realtime) autoPickExpiredTurn();
   }
 
   function pulseScore(element) {
@@ -1415,6 +1431,64 @@
     playTone(userWon ? 1100 : 240, 0.18, userWon ? "triangle" : "sine");
   }
 
+  // ---- opponent left: full screen state instead of a toast the player can miss ----
+  let opponentLeftTimer = null;
+  let opponentLeftDeadline = 0;
+
+  function clearOpponentLeftCountdown() {
+    if (opponentLeftTimer) window.clearInterval(opponentLeftTimer);
+    opponentLeftTimer = null;
+    opponentLeftDeadline = 0;
+  }
+
+  function closeOpponentLeftCard() {
+    clearOpponentLeftCountdown();
+    if (els.opponentLeftOverlay) els.opponentLeftOverlay.hidden = true;
+  }
+
+  function showOpponentLeftCard(payload = {}) {
+    if (!els.opponentLeftOverlay) return;
+    const canReconnect = payload.canReconnect !== false;
+    els.opponentLeftEyebrow.textContent = canReconnect ? "BAĞLANTI KESİLDİ" : "RAKİP AYRILDI";
+    els.opponentLeftTitle.textContent = canReconnect ? "Rakip ayrıldı" : "Maç sonlandı";
+    els.opponentLeftMessage.textContent = payload.message
+      || (canReconnect ? "Rakibin bağlantısı koptu." : "Rakip odayı terk etti.");
+    els.opponentLeftIcon.textContent = canReconnect ? "wifi_off" : "person_off";
+    els.opponentLeftLobbyButton.textContent = canReconnect ? "LOBİYE DÖN" : "ANA MENÜ";
+
+    clearOpponentLeftCountdown();
+    const graceMs = Number(payload.graceMs) || 0;
+    if (canReconnect && graceMs > 0) {
+      els.opponentLeftTimer.hidden = false;
+      els.opponentLeftWaitButton.disabled = true;
+      els.opponentLeftWaitButton.innerHTML = `BEKLEMEDE KAL ${materialIcon("hourglass_top")}`;
+      opponentLeftDeadline = Date.now() + graceMs;
+      const tick = () => {
+        const left = Math.max(0, Math.ceil((opponentLeftDeadline - Date.now()) / 1000));
+        els.opponentLeftCountdown.textContent = String(left);
+        if (left <= 0) clearOpponentLeftCountdown();
+      };
+      tick();
+      opponentLeftTimer = window.setInterval(tick, 250);
+    } else {
+      els.opponentLeftTimer.hidden = true;
+      els.opponentLeftWaitButton.disabled = false;
+      els.opponentLeftWaitButton.innerHTML = `DEVAM ET ${materialIcon("arrow_forward")}`;
+    }
+    els.opponentLeftOverlay.hidden = false;
+  }
+
+  // ---- turn timer: pick automatically so a round can never hang ----
+  function autoPickExpiredTurn() {
+    const match = state.match;
+    if (!match || match.phase !== "aim" || match.userConfirmed) return;
+    const zone = Math.floor(Math.random() * 9);
+    match.userAim = { type: "goal", cell: zone };
+    setAim(match.userAim);
+    showToast("Süre doldu, hedef otomatik seçildi.", "orange");
+    confirmRealtimeUserAction();
+  }
+
   function exitRealtime() {
     stopCrowdAmbience();
     // The match is over, so keep the room snapshot: the lobby can then show
@@ -1708,6 +1782,23 @@
   els.exitConfirmCancel?.addEventListener("click", closeExitConfirmation);
   els.exitConfirmConfirm?.addEventListener("click", confirmExitAction);
   els.exitConfirmBackdrop?.addEventListener("click", closeExitConfirmation);
+  els.opponentLeftWaitButton?.addEventListener("click", () => {
+    closeOpponentLeftCard();
+    if (state.match) {
+      state.match.phase = "aim";
+      els.opponentStatusText.textContent = "Rakip bekleniyor…";
+      renderMatch();
+    }
+  });
+  els.opponentLeftLobbyButton?.addEventListener("click", () => {
+    closeOpponentLeftCard();
+    if (realtimeFinishedShown || state.match?.phase === "finished") {
+      window.PenaltiShared?.leaveRoom?.();
+      window.location.href = "index.html";
+      return;
+    }
+    window.location.href = "lobby.html";
+  });
   els.leaveTournamentButton.addEventListener("click", leaveTournament);
   els.tournamentNextButton.addEventListener("click", tournamentNext);
   els.confirmButton.addEventListener("click", confirmUserAction);

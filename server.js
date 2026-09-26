@@ -13,6 +13,10 @@ const ROOM_CODE_PATTERN = /^[2-9A-HJ-NP-Z]{6}$/;
 const ROOM_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const REGULATION_SHOTS = 10;
 const DISCONNECT_GRACE_MS = 10000;
+// Every round must resolve. If a player does not pick in time the server
+// picks for them, so an idle or half connected client can never freeze a duel.
+const TURN_MS = 10000;
+const TURN_SWEEP_MS = 500;
 const createRoomCode = customAlphabet(ROOM_ALPHABET, 6);
 
 const app = express();
@@ -168,6 +172,16 @@ function scheduleDisconnectCleanup(room, player) {
 function finishAfterPlayerRemoval(room, player) {
   if (room.status !== "in_progress") return;
   room.status = "finished";
+  room.turnDeadline = null;
+  io.to(room.code).emit("opponent:left", {
+    playerId: player.id,
+    nickname: player.nickname,
+    message: `${player.nickname} odayı terk etti.`,
+    reason: "opponent_gone",
+    canReconnect: false,
+    graceMs: 0,
+    room: publicRoom(room),
+  });
   io.to(room.code).emit("match:finished", {
     reason: "opponent_disconnected",
     message: `${player.nickname} bağlantısı koptu, maç sonlandırıldı.`,
@@ -219,6 +233,17 @@ function removePlayerFromRoom(socket, reason = "left", explicit = true) {
     io.to(room.code).emit("opponent:disconnected", {
       playerId: player.id,
       message: "Rakip bağlantısı kesildi, yeniden bağlanılıyor…",
+      room: publicRoom(room),
+    });
+    // A full screen state so the remaining player is never left guessing
+    // whether the game is still alive.
+    io.to(room.code).emit("opponent:left", {
+      playerId: player.id,
+      nickname: player.nickname,
+      message: `${player.nickname} bağlantısı kesildi.`,
+      reason,
+      canReconnect: true,
+      graceMs: DISCONNECT_GRACE_MS,
       room: publicRoom(room),
     });
     scheduleDisconnectCleanup(room, player);
@@ -297,6 +322,7 @@ function startMatch(room) {
   room.match = createMatch();
   room.pendingShots = { forvet: null, kaleci: null };
   room.pendingNext = false;
+  room.turnDeadline = Date.now() + TURN_MS;
   const roles = assignRoles(room);
   const response = {
     ok: true,
@@ -329,6 +355,7 @@ function resolveRound(room) {
   room.match.shots.kaleci.push({ round: room.match.round, zone: kaleciZone, result });
   room.pendingShots = { forvet: null, kaleci: null };
   room.pendingNext = true;
+  room.turnDeadline = null;
   room.lastResult = {
     round: room.match.round,
     result,
@@ -392,6 +419,11 @@ function handleShot(socket, kind, payload, ack) {
     reply(ack, { ok: false, error: { code: "WAIT_NEXT_ROUND", message: "Yeni tur için diğer oyuncuyu bekle." } });
     return;
   }
+  if (room.turnDeadline && Date.now() > room.turnDeadline) {
+    reply(ack, { ok: false, error: { code: "TURN_EXPIRED", message: "Süre doldu, seçim otomatik yapıldı." } });
+    sweepExpiredTurn(room);
+    return;
+  }
   const player = getPlayerForSocket(socket, room);
   const expectedRole = kind === "shot:submit" ? "forvet" : "kaleci";
   if (!player || player.role !== expectedRole) {
@@ -418,6 +450,35 @@ function handleShot(socket, kind, payload, ack) {
   });
   reply(ack, { ok: true, role: expectedRole, round: room.match.round });
   resolveRound(room);
+}
+
+// Pick a random zone for whoever has not chosen yet. Both the striker and the
+// keeper are treated the same way, so timing out is never an advantage.
+function submitRandomZone(room, role) {
+  if (room.pendingShots[role] !== null) return;
+  room.pendingShots[role] = Math.floor(Math.random() * 9);
+  io.to(room.code).emit("shot:autopicked", {
+    role,
+    round: room.match.round,
+    zone: room.pendingShots[role],
+  });
+}
+
+function sweepExpiredTurn(room) {
+  if (!room || room.status !== "in_progress" || room.pendingNext) return false;
+  if (!room.turnDeadline || Date.now() <= room.turnDeadline) return false;
+  submitRandomZone(room, "forvet");
+  submitRandomZone(room, "kaleci");
+  resolveRound(room);
+  return true;
+}
+
+function startTurnSweeper() {
+  const timer = setInterval(() => {
+    rooms.forEach((room) => sweepExpiredTurn(room));
+  }, TURN_SWEEP_MS);
+  timer.unref?.();
+  return timer;
 }
 
 io.on("connection", (socket) => {
@@ -569,6 +630,7 @@ io.on("connection", (socket) => {
     room.match = createMatch();
     room.pendingShots = { forvet: null, kaleci: null };
     room.pendingNext = false;
+    room.turnDeadline = null;
     room.lastResult = null;
     room.players.forEach((candidate) => {
       candidate.ready = false;
@@ -597,6 +659,8 @@ io.on("connection", (socket) => {
         kaleciId: roles?.kaleciId,
         score: { ...room.match.score },
         goldenPenalty: room.match.goldenPenalty,
+        turnDeadline: room.turnDeadline,
+        turnMs: TURN_MS,
         room: publicRoom(room),
         replayed,
       };
@@ -613,6 +677,7 @@ io.on("connection", (socket) => {
     }
 
     room.pendingNext = false;
+    room.turnDeadline = Date.now() + TURN_MS;
     const response = buildResponse(false);
     io.to(room.code).emit("round:ready", response);
     reply(ack, response);
@@ -622,6 +687,8 @@ io.on("connection", (socket) => {
     removePlayerFromRoom(socket, "disconnect", false);
   });
 });
+
+startTurnSweeper();
 
 httpServer.listen(port, "0.0.0.0", () => {
   console.log(`Server listening on port ${port}`);

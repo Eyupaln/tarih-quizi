@@ -270,6 +270,21 @@
         </div>
       </div>
 
+      <div class="opponent-left-overlay" id="opponentLeftOverlay" hidden>
+        <div class="opponent-left-card" role="dialog" aria-modal="true" aria-labelledby="opponentLeftTitle" aria-describedby="opponentLeftMessage">
+          <div class="opponent-left-icon material-symbols-rounded" id="opponentLeftIcon">wifi_off</div>
+          <span class="eyebrow" id="opponentLeftEyebrow">BAĞLANTI KESİLDİ</span>
+          <h2 id="opponentLeftTitle">Rakip ayrıldı</h2>
+          <p id="opponentLeftMessage">Rakibin bağlantısı koptu.</p>
+          <div class="opponent-left-timer" id="opponentLeftTimer" hidden>
+            <span class="opponent-left-timer__value" id="opponentLeftCountdown">10</span>
+            <span class="opponent-left-timer__label">saniye içinde geri dönebilir</span>
+          </div>
+          <button class="opponent-left-primary" id="opponentLeftWaitButton" type="button">BEKLEMEDE KAL <span class="material-symbols-rounded">hourglass_top</span></button>
+          <button class="opponent-left-secondary" id="opponentLeftLobbyButton" type="button">LOBİYE DÖN</button>
+        </div>
+      </div>
+
       <div class="exit-confirm-overlay" id="exitConfirmOverlay" hidden>
         <div class="exit-confirm-backdrop" id="exitConfirmBackdrop"></div>
         <div class="exit-confirm-card" role="dialog" aria-modal="true" aria-labelledby="exitConfirmTitle" aria-describedby="exitConfirmText">
