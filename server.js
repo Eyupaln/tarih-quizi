@@ -419,6 +419,20 @@ function startMatch(room) {
   return response;
 }
 
+// Sudden death is decided in pairs. Rounds 11 and 12 are the first pair, 13 and
+// 14 the next, and the roles swap inside every round, so each player takes one
+// kick per pair. A pair only ends the match when exactly one of its two kicks
+// scored, and the scorer wins. Both scoring, or both being saved, carries on to
+// the next pair. This mirrors the client's suddenPairComplete rule, which only
+// ever looks at even rounds.
+function resolveGoldenPair(room) {
+  const pair = room.match.shots.forvet.slice(-2);
+  if (pair.length < 2) return null;
+  const goals = pair.filter((shot) => shot.result === "GOL");
+  if (goals.length !== 1) return null;
+  return rolesForRound(room, goals[0].round)?.forvetId ?? null;
+}
+
 function resolveRound(room) {
   const forvetTarget = room.pendingShots.forvet;
   const kaleciTarget = room.pendingShots.kaleci;
@@ -451,8 +465,14 @@ function resolveRound(room) {
   let winnerId = null;
   let goldenPenalty = room.match.goldenPenalty;
   if (room.match.goldenPenalty) {
-    matchOver = true;
-    winnerId = result === "GOL" ? forvet.id : kaleci.id;
+    // Only an even round closes a pair, so an odd round can never end the
+    // match. Without this a single kick decided sudden death, and a save
+    // handed the match to the keeper on a 0-0 score.
+    if (room.match.round % 2 === 0) {
+      winnerId = resolveGoldenPair(room);
+      matchOver = winnerId !== null;
+    }
+    if (!matchOver) room.match.round += 1;
   } else if (room.match.round >= REGULATION_SHOTS) {
     if (room.match.score.player1 === room.match.score.player2) {
       room.match.goldenPenalty = true;
