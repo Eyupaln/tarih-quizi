@@ -594,6 +594,13 @@
       if (payload?.message) showToast(payload.message, "orange");
     });
     shared.onSocket("connect_error", () => showToast("Sunucuya bağlanılamadı.", "orange"));
+    shared.onSocket("connect", () => {
+      // A dropped socket (screen lock, app backgrounded, network blip) is
+      // replaced by a brand-new socket id the server does not know, so the
+      // client silently stops receiving room events. Re-join to recover.
+      if (!state.realtime || !state.roomCode || !realtimeMatchActive) return;
+      window.setTimeout(() => rejoinRealtimeRoom(), 200);
+    });
   }
 
   function startRealtimeMatch(payload = {}) {
@@ -646,7 +653,15 @@
 
   function handleRealtimeRoundReady(payload) {
     if (!state.match) return;
+    const nextRound = Number(payload?.round);
+    const alreadyReady = state.match.phase === "aim" && nextRound === state.match.round;
     updateRealtimeRound(payload);
+    if (alreadyReady) {
+      // Duplicate round:ready (both players pressed the result button).
+      // The round is already running, so just refresh the view.
+      renderMatch();
+      return;
+    }
     state.match.phase = "aim";
     beginRound();
   }
@@ -721,10 +736,25 @@
       return;
     }
     if (!["next-round", "start-sudden", "next-sudden"].includes(state.resultAction)) return;
+    const previousPhase = state.match?.phase;
     els.resultOverlay.hidden = true;
     if (state.match) state.match.phase = "waiting-next";
     els.opponentStatusText.textContent = "Yeni tur bekleniyor…";
-    window.PenaltiShared.emitWithAck("match:next").catch((error) => {
+    window.PenaltiShared.emitWithAck("match:next").then((response) => {
+      if (response?.ok) return;
+      // Server refused: restore the result screen so the player is never stuck.
+      if (state.match && state.match.phase === "waiting-next") {
+        state.match.phase = previousPhase || "result";
+        els.resultOverlay.hidden = false;
+        renderMatch();
+      }
+      if (response?.error?.message) showToast(response.error.message, "orange");
+    }).catch((error) => {
+      if (state.match && state.match.phase === "waiting-next") {
+        state.match.phase = previousPhase || "result";
+        els.resultOverlay.hidden = false;
+        renderMatch();
+      }
       if (error?.message) showToast(error.message, "orange");
     });
   }
@@ -747,6 +777,32 @@
       match.userConfirmed = false;
       renderMatch();
       showToast(error.message || "Seçimin gönderilemedi.", "orange");
+    }
+  }
+
+  async function rejoinRealtimeRoom() {
+    const shared = window.PenaltiShared;
+    if (!state.realtime || !state.roomCode) return null;
+    try {
+      const response = await shared.emitWithAck("room:rejoin", {
+        code: state.roomCode,
+        nickname: shared.getPlayerName(),
+        playerToken: shared.getPlayerToken(),
+      });
+      if (!response?.ok) return null;
+      if (response.room) applyRealtimeRoom(response.room);
+      // Unfreeze the local round so input works again after a reconnect.
+      if (state.match && state.match.phase !== "finished") {
+        if (state.match.phase === "waiting-opponent") {
+          state.match.phase = "aim";
+          els.opponentStatusText.textContent = userIsStriker() ? "Rakip kaleyi savunuyor…" : "Rakip şutunu hazırlıyor…";
+        }
+        if (state.match.phase === "waiting-next") state.match.phase = "result";
+        renderMatch();
+      }
+      return response;
+    } catch {
+      return null;
     }
   }
 

@@ -488,12 +488,18 @@ io.on("connection", (socket) => {
     }
     if (payload.nickname) player.nickname = cleanNickname(payload.nickname) || player.nickname;
     attachSocketToRoom(socket, room, player);
+    const resumedRoles = room.status === "in_progress" ? assignRoles(room) : null;
     const response = {
       ok: true,
       code: room.code,
       room: publicRoom(room),
       player: publicPlayer(player, room),
       started: room.status === "in_progress",
+      round: room.match?.round,
+      forvetId: resumedRoles?.forvetId,
+      kaleciId: resumedRoles?.kaleciId,
+      goldenPenalty: room.match?.goldenPenalty,
+      score: room.match?.score ? { ...room.match.score } : undefined,
     };
     socket.emit("room:rejoined", response);
     io.to(room.code).emit("room:playerReconnected", { player: publicPlayer(player, room), room: publicRoom(room) });
@@ -551,21 +557,36 @@ io.on("connection", (socket) => {
 
   socket.on("match:next", (_payload, ack) => {
     const room = getRoomForSocket(socket);
-    if (!room || room.status !== "in_progress" || !room.pendingNext) {
-      reply(ack, { ok: false, error: { code: "WAIT_NEXT_ROUND", message: "Yeni tur için sonucu bekleyin." } });
+    if (!room || room.status !== "in_progress") {
+      emitError(socket, ack, "NOT_IN_ROOM", "Maç artık devam etmiyor.");
       return;
     }
-    room.pendingNext = false;
-    const roles = assignRoles(room);
-    const response = {
-      ok: true,
-      round: room.match.round,
-      forvetId: roles?.forvetId,
-      kaleciId: roles?.kaleciId,
-      score: { ...room.match.score },
-      goldenPenalty: room.match.goldenPenalty,
-      room: publicRoom(room),
+    const buildResponse = (replayed) => {
+      const roles = assignRoles(room);
+      return {
+        ok: true,
+        round: room.match.round,
+        forvetId: roles?.forvetId,
+        kaleciId: roles?.kaleciId,
+        score: { ...room.match.score },
+        goldenPenalty: room.match.goldenPenalty,
+        room: publicRoom(room),
+        replayed,
+      };
     };
+
+    // Both players press the result button. The first one advances the round;
+    // the second must receive the already-advanced round instead of an error,
+    // otherwise that client is left stuck and can never select again.
+    if (!room.pendingNext) {
+      const response = buildResponse(true);
+      socket.emit("round:ready", response);
+      reply(ack, response);
+      return;
+    }
+
+    room.pendingNext = false;
+    const response = buildResponse(false);
     io.to(room.code).emit("round:ready", response);
     reply(ack, response);
   });

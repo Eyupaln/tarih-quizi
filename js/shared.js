@@ -113,6 +113,12 @@
       autoConnect: true,
       transports: ["websocket", "polling"],
       auth: { playerToken: getPlayerToken() },
+      // Mobile networks drop sockets often; recover quickly and keep trying.
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 3000,
+      randomizationFactor: 0.4,
     })
     : null;
 
@@ -136,7 +142,23 @@
     if (!socket) {
       return Promise.reject(new Error("Sunucu bağlantısı bulunamadı."));
     }
-    return new Promise((resolve, reject) => {
+    // Socket.io buffers emits while reconnecting, but a long outage would make
+    // the caller wait for the full timeout. Give the socket a short window to
+    // come back so a tap during a brief network blip is not silently lost.
+    const waitForConnection = socket.connected
+      ? Promise.resolve()
+      : new Promise((resolve, reject) => {
+        const timer = window.setTimeout(() => {
+          offConnect();
+          reject(new Error("Sunucuya ulaşılamadı."));
+        }, 4000);
+        const offConnect = socket.once("connect", () => {
+          window.clearTimeout(timer);
+          resolve();
+        });
+      });
+
+    return waitForConnection.then(() => new Promise((resolve, reject) => {
       let settled = false;
       const timer = window.setTimeout(() => {
         if (settled) return;
@@ -149,7 +171,7 @@
         window.clearTimeout(timer);
         resolve(response);
       });
-    });
+    }));
   }
 
   function setRoomSnapshot(room, code = room?.code) {
@@ -268,6 +290,37 @@
   function setSoundEnabled(enabled) {
     writeStorage(STORAGE_KEYS.sound, String(Boolean(enabled)));
     syncMenuMusic();
+  }
+
+  const BUTTON_SOUND_SOURCE = encodeURI("assets/buttontıklama.mp3");
+  const BUTTON_SOUND_VOLUME = 0.42;
+  let buttonSoundPlayer = null;
+
+  function playButtonSound() {
+    if (!getSoundEnabled()) return;
+    try {
+      if (!buttonSoundPlayer) {
+        buttonSoundPlayer = new Audio(BUTTON_SOUND_SOURCE);
+        buttonSoundPlayer.preload = "auto";
+        buttonSoundPlayer.volume = BUTTON_SOUND_VOLUME;
+        buttonSoundPlayer.load();
+      }
+      buttonSoundPlayer.pause();
+      buttonSoundPlayer.currentTime = 0;
+      const playRequest = buttonSoundPlayer.play();
+      if (playRequest) playRequest.catch(() => {});
+    } catch {
+      // Button audio is an enhancement; gameplay must continue if it fails.
+    }
+  }
+
+  function isInteractiveButton(target) {
+    const button = target instanceof Element
+      ? target.closest("button, [role='button'], a[href]")
+      : null;
+    if (!button || button.hidden || button.getAttribute("aria-hidden") === "true") return false;
+    if (button instanceof HTMLButtonElement && button.disabled) return false;
+    return button.getAttribute("aria-disabled") !== "true";
   }
 
   const MENU_TRACK_SOURCES = [
@@ -478,6 +531,13 @@
     });
   }
 
+  document.addEventListener("pointerdown", (event) => {
+    if (isInteractiveButton(event.target)) playButtonSound();
+  }, { passive: true });
+  document.addEventListener("keydown", (event) => {
+    if (event.repeat || !["Enter", " "].includes(event.key)) return;
+    if (isInteractiveButton(event.target)) playButtonSound();
+  });
   document.addEventListener("pointerdown", resumeMenuMusic);
   document.addEventListener("keydown", resumeMenuMusic);
   window.addEventListener("pagehide", () => {
@@ -526,6 +586,7 @@
     escapeHTML,
     getSoundEnabled,
     setSoundEnabled,
+    playButtonSound,
     startMenuMusic,
     resumeMenuMusic,
     pauseMenuMusic,
