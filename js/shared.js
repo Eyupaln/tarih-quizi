@@ -206,9 +206,20 @@
   // other.
   const GOAL_GRID = 3;
 
+  // Number(null), Number(""), Number([]) and Number(true) all pass
+  // Number.isInteger, so a bare coercion would quietly answer cell 0 for
+  // missing input. Mirrors the server's own toFiniteNumber.
+  function toFiniteNumber(value) {
+    const kind = typeof value;
+    if (kind !== "number" && kind !== "string") return null;
+    if (kind === "string" && value.trim() === "") return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
   function goalCellCenter(zone) {
-    const index = Number(zone);
-    if (!Number.isInteger(index) || index < 0 || index >= GOAL_GRID * GOAL_GRID) return null;
+    const index = toFiniteNumber(zone);
+    if (index === null || !Number.isInteger(index) || index < 0 || index >= GOAL_GRID * GOAL_GRID) return null;
     const step = 1 / GOAL_GRID;
     return {
       x: ((index % GOAL_GRID) + 0.5) * step,

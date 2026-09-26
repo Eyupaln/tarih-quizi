@@ -13,6 +13,23 @@ const ROOM_CODE_PATTERN = /^[2-9A-HJ-NP-Z]{6}$/;
 const ROOM_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const REGULATION_SHOTS = 10;
 const DISCONNECT_GRACE_MS = 20000;
+// Server-authoritative round timer. The client only mirrors this visually, so
+// this is the single place that decides when a round closes. A round that gets
+// no input from a player who is still connected is filled in rather than
+// cancelled, so one idle opponent can no longer freeze the match for both. A
+// player who is genuinely gone is left to the disconnect grace instead, so they
+// cannot be scored on for free while they might still come back.
+const ROUND_WINDOW_MS = 2200;
+// Late packets are still accepted for this long after the deadline. It absorbs
+// normal network jitter, it is not an idle allowance.
+const DEADLINE_GRACE_MS = 175;
+// A round's clock does not start when the round is announced, it starts when
+// every player confirms they can see the round. Otherwise the window is spent
+// while a page is still loading and the slower of two phones loses its turn
+// before the pitch appears. This cap is what stops that from becoming a way to
+// stall forever: if somebody never acknowledges, the window starts anyway and
+// the sweep does its job.
+const ROUND_ACK_TIMEOUT_MS = 3500;
 const createRoomCode = customAlphabet(ROOM_ALPHABET, 6);
 
 const app = express();
@@ -24,6 +41,10 @@ const io = new Server(httpServer, {
 
 const rooms = new Map();
 const disconnectTimers = new Map();
+// Per-room round timers: the acknowledgement cap and the round deadline. Kept
+// together so a match that is reset, abandoned or finished cannot be resolved
+// by a timer that was already in flight.
+const roundTimers = new Map();
 
 app.get("/health", (_request, response) => {
   response.json({ ok: true, rooms: rooms.size, uptime: process.uptime() });
@@ -63,9 +84,21 @@ function normalizeRoomCode(value) {
     .slice(0, 6);
 }
 
+// Number(null), Number(""), Number([]) and Number(true) are all finite and all
+// pass Number.isInteger, so a bare coercion turns absent or malformed input
+// into a valid looking value, which is how a missing zone used to be silently
+// accepted as cell 0. Only real numbers and numeric strings are accepted here.
+function toFiniteNumber(value) {
+  const kind = typeof value;
+  if (kind !== "number" && kind !== "string") return null;
+  if (kind === "string" && value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function normalizeZone(value) {
-  const zone = Number(value);
-  if (!Number.isInteger(zone) || zone < 0 || zone > 8) return null;
+  const zone = toFiniteNumber(value);
+  if (zone === null || !Number.isInteger(zone) || zone < 0 || zone > 8) return null;
   return zone;
 }
 
@@ -89,8 +122,8 @@ export const DIVE_RADIUS = 0.52;
 
 // Centre of a 3x3 goal cell, as { x, y } in 0-1 goal space.
 export function cellCenter(zone) {
-  const index = Number(zone);
-  if (!Number.isInteger(index) || index < 0 || index >= GOAL_GRID * GOAL_GRID) return null;
+  const index = toFiniteNumber(zone);
+  if (index === null || !Number.isInteger(index) || index < 0 || index >= GOAL_GRID * GOAL_GRID) return null;
   const column = index % GOAL_GRID;
   const row = Math.floor(index / GOAL_GRID);
   const step = 1 / GOAL_GRID;
@@ -134,9 +167,9 @@ export function normalizeTarget(payload) {
   if (!payload || typeof payload !== "object") return null;
 
   if (payload.x !== undefined || payload.y !== undefined) {
-    const x = Number(payload.x);
-    const y = Number(payload.y);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const x = toFiniteNumber(payload.x);
+    const y = toFiniteNumber(payload.y);
+    if (x === null || y === null) return null;
     const target = { x: clamp01(x), y: clamp01(y) };
     return { x: target.x, y: target.y, zone: nearestCell(target) };
   }
@@ -170,6 +203,8 @@ function createRoom() {
     pendingShots: { forvet: null, kaleci: null },
     pendingNext: false,
     lastResult: null,
+    deadline: null,
+    acks: [],
     createdAt: Date.now(),
   };
   rooms.set(code, room);
@@ -247,6 +282,7 @@ function scheduleDisconnectCleanup(room, player) {
 function finishAfterPlayerRemoval(room, player) {
   if (room.status !== "in_progress") return;
   room.status = "finished";
+  clearRoundTimers(room.code);
   io.to(room.code).emit("opponent:left", {
     playerId: player.id,
     nickname: player.nickname,
@@ -275,6 +311,7 @@ function removePlayer(room, player, reason = "left") {
   if (room.hostId === player.id) room.hostId = room.players[0]?.id || null;
 
   if (room.players.length === 0) {
+    clearRoundTimers(room.code);
     rooms.delete(room.code);
     return;
   }
@@ -404,6 +441,7 @@ function startMatch(room) {
   room.pendingShots = { forvet: null, kaleci: null };
   room.pendingNext = false;
   const roles = assignRoles(room);
+  announceRound(room);
   const response = {
     ok: true,
     room: publicRoom(room),
@@ -413,6 +451,7 @@ function startMatch(room) {
     round: room.match.round,
     score: { ...room.match.score },
     goldenPenalty: false,
+    ...roundTiming(room),
   };
   io.to(room.code).emit("match:started", response);
   emitRoomState(room);
@@ -433,7 +472,152 @@ function resolveGoldenPair(room) {
   return rolesForRound(room, goals[0].round)?.forvetId ?? null;
 }
 
-function resolveRound(room) {
+// Timing fields published with every round payload. The client counts down
+// from remainingMs and never compares its own clock to the server's, because
+// the two can be seconds apart. deadline is published for transparency and for
+// debugging; it is not meant to be used for arithmetic on the client. While the
+// round is still waiting for both players to acknowledge, deadline and
+// remainingMs are null and ackPending says so. Publishing a duration rather
+// than only an instant follows the same shape as graceMs elsewhere in this
+// file.
+function roundTiming(room) {
+  const started = Number.isFinite(room.deadline);
+  return {
+    deadline: started ? room.deadline : null,
+    windowMs: ROUND_WINDOW_MS,
+    graceMs: DEADLINE_GRACE_MS,
+    remainingMs: started ? Math.max(0, room.deadline - Date.now()) : null,
+    ackPending: !started,
+  };
+}
+
+function roundTimerSlot(code) {
+  let entry = roundTimers.get(code);
+  if (!entry) {
+    entry = { ack: null, deadline: null };
+    roundTimers.set(code, entry);
+  }
+  return entry;
+}
+
+function clearRoundDeadline(code) {
+  const entry = roundTimers.get(code);
+  if (!entry?.deadline) return;
+  clearTimeout(entry.deadline);
+  entry.deadline = null;
+}
+
+function clearRoundTimers(code) {
+  const entry = roundTimers.get(code);
+  if (!entry) return;
+  if (entry.ack) clearTimeout(entry.ack);
+  if (entry.deadline) clearTimeout(entry.deadline);
+  roundTimers.delete(code);
+}
+
+function randomTarget() {
+  return { x: Math.random(), y: Math.random() };
+}
+
+// Latest instant a submission for this round is still accepted: the round's own
+// deadline plus the grace, which is the same instant the sweep fires.
+//
+// There is deliberately no client-supplied timestamp here. An earlier version
+// accepted a clientAt and extended the cutoff by up to one extra window, but the
+// acknowledgement handshake made it dead: the window only opens once every
+// player has said it drew the round, so there is no "learned about it late" case
+// left to compensate. Keeping it would also have made the late-arrival error
+// depend on the client's clock, so a skewed client would see WAIT_NEXT_ROUND
+// where a normal one saw TURN_EXPIRED. Now the answer is the same for everyone.
+function submissionCutoff(room) {
+  if (!Number.isFinite(room.deadline)) return Infinity;
+  return room.deadline + DEADLINE_GRACE_MS;
+}
+
+// Starts the round's window. Called only once every player has acknowledged
+// the round, or once the acknowledgement cap has run out. Returns the deadline,
+// or null when the round is not in a state that can be timed.
+function beginRoundWindow(room) {
+  if (!room || room.status !== "in_progress" || room.pendingNext) return null;
+  const slot = roundTimerSlot(room.code);
+  // The cap has done its job, whether the round was acknowledged or the cap is
+  // what started the window. Cancelling it here rather than relying on its own
+  // deadline guard keeps the two timers from overlapping.
+  if (slot.ack) {
+    clearTimeout(slot.ack);
+    slot.ack = null;
+  }
+  clearRoundDeadline(room.code);
+  room.deadline = Date.now() + ROUND_WINDOW_MS;
+  slot.deadline = setTimeout(() => {
+    slot.deadline = null;
+    sweepRound(room);
+  }, ROUND_WINDOW_MS + DEADLINE_GRACE_MS);
+  return room.deadline;
+}
+
+// Announces a round without starting its clock, and arms the cap that starts
+// the clock anyway if somebody never acknowledges.
+function announceRound(room) {
+  clearRoundTimers(room.code);
+  room.deadline = null;
+  room.acks = [];
+  const slot = roundTimerSlot(room.code);
+  slot.ack = setTimeout(() => {
+    slot.ack = null;
+    if (room.deadline !== null) return;
+    if (beginRoundWindow(room)) {
+      io.to(room.code).emit("round:ready", roundReadyPayload(room, false));
+    }
+  }, ROUND_ACK_TIMEOUT_MS);
+}
+
+function everyoneAcknowledged(room) {
+  return room.players.length > 0 && room.players.every((player) => room.acks.includes(player.id));
+}
+
+// One shape for every round announcement, so the acknowledgement path and the
+// advance path cannot drift apart.
+function roundReadyPayload(room, replayed) {
+  const roles = assignRoles(room);
+  return {
+    ok: true,
+    round: room.match.round,
+    forvetId: roles?.forvetId,
+    kaleciId: roles?.kaleciId,
+    score: { ...room.match.score },
+    goldenPenalty: room.match.goldenPenalty,
+    ...roundTiming(room),
+    room: publicRoom(room),
+    replayed,
+  };
+}
+
+// The round is out of time. Fill in whichever side never submitted and resolve.
+// The match always plays on, so the other player is not punished for a
+// disconnected or idle opponent.
+function sweepRound(room) {
+  if (!room || room.status !== "in_progress" || room.pendingNext) return;
+  const roles = rolesForRound(room);
+  // A player who is gone is not idle, and filling in their side would hand the
+  // other player free goals for as long as the reconnect window lasts. They are
+  // already covered by DISCONNECT_GRACE_MS: either they come back and the round
+  // is played, or the disconnect cleanup ends the match. So a round missing a
+  // disconnected side waits instead of being resolved.
+  const disconnected = [roles?.forvetId, roles?.kaleciId].some((id) => {
+    const player = room.players.find((candidate) => candidate.id === id);
+    return player && player.connected === false;
+  });
+  if (disconnected) return;
+  const missing = ["forvet", "kaleci"].filter((role) => room.pendingShots[role] === null);
+  if (missing.length === 0) return;
+  missing.forEach((role) => {
+    room.pendingShots[role] = normalizeTarget(randomTarget());
+  });
+  resolveRound(room, missing);
+}
+
+function resolveRound(room, autoPicked = []) {
   const forvetTarget = room.pendingShots.forvet;
   const kaleciTarget = room.pendingShots.kaleci;
   if (forvetTarget === null || kaleciTarget === null) return null;
@@ -442,6 +626,13 @@ function resolveRound(room) {
   const forvet = room.players.find((player) => player.id === roles?.forvetId);
   const kaleci = room.players.find((player) => player.id === roles?.kaleciId);
   if (!forvet || !kaleci) return null;
+
+  // The round is settled, so neither its deadline nor its acknowledgement cap
+  // may fire again. This runs after the player lookup on purpose: cancelling
+  // the timers first and then bailing here would leave the room with no timers,
+  // pendingNext still false and both shots banked, so nothing could ever
+  // resolve it again.
+  clearRoundTimers(room.code);
 
   const forvetZone = forvetTarget.zone;
   const kaleciZone = kaleciTarget.zone;
@@ -495,6 +686,11 @@ function resolveRound(room) {
     goldenPenalty,
     matchOver,
     winnerId,
+    // True when the deadline filled in a side instead of a player choosing.
+    // autoPicked names those roles, so each client can say whether it was
+    // itself that ran out of time.
+    expired: autoPicked.length > 0,
+    autoPicked: [...autoPicked],
     room: publicRoom(room),
   };
   io.to(room.code).emit("round:result", resultPayload);
@@ -516,13 +712,26 @@ function handleShot(socket, kind, payload, ack) {
     emitError(socket, ack, "NOT_IN_ROOM", "Önce bir odaya girmelisin.");
     return;
   }
+  const player = getPlayerForSocket(socket, room);
+  const expectedRole = kind === "shot:submit" ? "forvet" : "kaleci";
+  const isMyTurn = Boolean(player) && player.role === expectedRole;
+
+  // Checked before the round state gate, so a player who was too slow always
+  // gets the same clear reason. Once the sweep has resolved the round the
+  // pendingNext gate below would answer WAIT_NEXT_ROUND instead, which tells
+  // the player nothing about why their input was thrown away. Only players
+  // whose own input is still missing are rejected: a shot that is already
+  // banked keeps falling through to the benign "ignored" reply below.
+  if (isMyTurn && room.pendingShots[expectedRole] === null && room.deadline
+    && Date.now() > submissionCutoff(room)) {
+    emitError(socket, ack, "TURN_EXPIRED", "Süre doldu, hamlen otomatik seçildi.");
+    return;
+  }
   if (room.status !== "in_progress" || room.pendingNext) {
     reply(ack, { ok: false, error: { code: "WAIT_NEXT_ROUND", message: "Yeni tur için diğer oyuncuyu bekle." } });
     return;
   }
-  const player = getPlayerForSocket(socket, room);
-  const expectedRole = kind === "shot:submit" ? "forvet" : "kaleci";
-  if (!player || player.role !== expectedRole) {
+  if (!isMyTurn) {
     emitError(socket, ack, "ROLE_NOT_ALLOWED", "Bu turda bu işlemi yapma sırası sende değil.");
     return;
   }
@@ -628,6 +837,9 @@ io.on("connection", (socket) => {
       kaleciId: resumedRoles?.kaleciId,
       goldenPenalty: room.match?.goldenPenalty,
       score: room.match?.score ? { ...room.match.score } : undefined,
+      // The round is still running, so a reconnecting player gets the timing
+      // of the round it missed rather than a fresh window.
+      ...roundTiming(room),
     };
     socket.emit("room:rejoined", response);
     io.to(room.code).emit("room:playerReconnected", { player: publicPlayer(player, room), room: publicRoom(room) });
@@ -698,6 +910,11 @@ io.on("connection", (socket) => {
     room.pendingShots = { forvet: null, kaleci: null };
     room.pendingNext = false;
     room.lastResult = null;
+    // The finished match's timers must not survive into the lobby, or into the
+    // next match.
+    clearRoundTimers(room.code);
+    room.deadline = null;
+    room.acks = [];
     room.players.forEach((candidate) => {
       candidate.ready = false;
       candidate.role = null;
@@ -710,6 +927,34 @@ io.on("connection", (socket) => {
   socket.on("shot:submit", (payload = {}, ack) => handleShot(socket, "shot:submit", payload, ack));
   socket.on("save:submit", (payload = {}, ack) => handleShot(socket, "save:submit", payload, ack));
 
+  // "I have the round and I have drawn it." The round's clock starts when this
+  // arrives from everyone, so nobody loses their turn to a slow page load. If
+  // it never arrives, the cap armed by announceRound starts the clock anyway.
+  socket.on("round:ack", (payload = {}, ack) => {
+    const room = getRoomForSocket(socket);
+    const player = getPlayerForSocket(socket, room);
+    if (!room || !player || room.status !== "in_progress" || room.pendingNext) {
+      reply(ack, { ok: true, ignored: true });
+      return;
+    }
+    // An acknowledgement names the round it belongs to. Without this check an
+    // ack delayed across a round boundary lands in the next round's ack set and
+    // can start that window before its player has drawn the round. Compared with
+    // toFiniteNumber rather than Number() because Number(true) is 1 and
+    // Number([5]) is 5, so a malformed round would otherwise match round 1 or
+    // round 5 by accident. A client too old to send a round is ignored, which
+    // is safe: every round then opens on the acknowledgement cap instead.
+    if (toFiniteNumber(payload.round) !== room.match.round) {
+      reply(ack, { ok: true, ignored: true });
+      return;
+    }
+    if (!room.acks.includes(player.id)) room.acks.push(player.id);
+    if (room.deadline === null && everyoneAcknowledged(room) && beginRoundWindow(room)) {
+      io.to(room.code).emit("round:ready", roundReadyPayload(room, false));
+    }
+    reply(ack, { ok: true, round: room.match.round, acked: room.acks.length, ...roundTiming(room) });
+  });
+
   socket.on("match:next", (_payload, ack) => {
     const room = getRoomForSocket(socket);
     if (!room || room.status !== "in_progress") {
@@ -717,17 +962,11 @@ io.on("connection", (socket) => {
       return;
     }
     const buildResponse = (replayed) => {
-      const roles = assignRoles(room);
-      return {
-        ok: true,
-        round: room.match.round,
-        forvetId: roles?.forvetId,
-        kaleciId: roles?.kaleciId,
-        score: { ...room.match.score },
-        goldenPenalty: room.match.goldenPenalty,
-        room: publicRoom(room),
-        replayed,
-      };
+      // A replayed response describes a round the other player already started,
+      // so it must neither announce a new round nor hand out a second window to
+      // whoever pressed the button last.
+      if (!replayed) announceRound(room);
+      return roundReadyPayload(room, replayed);
     };
 
     // Both players press the result button. The first one advances the round;
