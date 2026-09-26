@@ -552,6 +552,33 @@ io.on("connection", (socket) => {
     reply(ack, response);
   });
 
+  // Put a finished room back into the lobby so the same two players can ready
+  // up again and play a rematch.
+  socket.on("match:reset", (_payload, ack) => {
+    const room = getRoomForSocket(socket);
+    const player = getPlayerForSocket(socket, room);
+    if (!room || !player) {
+      emitError(socket, ack, "NOT_IN_ROOM", "Önce bir odaya girmelisin.");
+      return;
+    }
+    if (room.status !== "finished") {
+      reply(ack, { ok: true, room: publicRoom(room) });
+      return;
+    }
+    room.status = "waiting";
+    room.match = createMatch();
+    room.pendingShots = { forvet: null, kaleci: null };
+    room.pendingNext = false;
+    room.lastResult = null;
+    room.players.forEach((candidate) => {
+      candidate.ready = false;
+      candidate.role = null;
+    });
+    const response = { ok: true, room: publicRoom(room) };
+    io.to(room.code).emit("room:reset", response);
+    reply(ack, response);
+  });
+
   socket.on("shot:submit", (payload = {}, ack) => handleShot(socket, "shot:submit", payload, ack));
   socket.on("save:submit", (payload = {}, ack) => handleShot(socket, "save:submit", payload, ack));
 
