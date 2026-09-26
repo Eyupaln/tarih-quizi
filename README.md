@@ -92,7 +92,7 @@ Vuruş/kurtarış senkronizasyonu sunucuda yapılır: iki taraf da seçimini gö
 - Hedef alanına dokunarak manuel vuruş/kurtarış seçimi
 - iki tarafın ayrı kilitlemesi ve `Oyuncu bekleniyor…` geri bildirimi
 - Düdük, vuruş, tribün ve gol sesleri
-- Tüm butonlarda ortak tıklama/keyboard sesi (`assets/buttontıklama.mp3`)
+- Tüm butonlarda ortak tıklama/keyboard sesi (`assets/buttontiklama.mp3`)
 - Forvet ve kalecı rolleri (tur tur değişir)
 - 5 + 5 vuruş ve altın penaltı
 - GOL / KURTARDI sonuç animasyonları ve skor senkronizasyonu

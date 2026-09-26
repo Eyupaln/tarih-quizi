@@ -292,9 +292,11 @@
     syncMenuMusic();
   }
 
-  const BUTTON_SOUND_SOURCE = encodeURI("assets/buttontıklama.mp3");
+  const BUTTON_SOUND_SOURCE = encodeURI("assets/buttontiklama.mp3");
   const BUTTON_SOUND_VOLUME = 0.42;
   let buttonSoundPlayer = null;
+
+  let lastButtonSoundAt = 0;
 
   function playButtonSound() {
     if (!getSoundEnabled()) return;
@@ -305,8 +307,16 @@
         buttonSoundPlayer.volume = BUTTON_SOUND_VOLUME;
         buttonSoundPlayer.load();
       }
-      buttonSoundPlayer.pause();
-      buttonSoundPlayer.currentTime = 0;
+      // Restarting every tap cuts the sample off and sounds choppy when the
+      // user taps quickly. Let a very short click finish, and only rewind
+      // once it has actually ended.
+      const now = Date.now();
+      const restarting = buttonSoundPlayer.paused || buttonSoundPlayer.ended;
+      if (!restarting && now - lastButtonSoundAt < 120) return;
+      if (restarting) {
+        buttonSoundPlayer.currentTime = 0;
+        lastButtonSoundAt = now;
+      }
       const playRequest = buttonSoundPlayer.play();
       if (playRequest) playRequest.catch(() => {});
     } catch {
