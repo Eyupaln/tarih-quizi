@@ -112,7 +112,8 @@ export const GOAL_GRID = 3;
 //   0.52     51.1%       75.5%         55.4%      40.7%   <- original
 //   0.47     44.1%       65.2%         47.9%      35.1%
 //   0.44     40.0%       58.5%         43.3%      31.9%
-//   0.40     34.4%       49.4%         37.2%      27.9%   <- now
+//   0.40     34.4%       49.4%         37.2%      27.9%
+//   0.38     31.7%       44.9%         34.3%      25.9%   <- now
 //
 // pi*r^2 is not the answer here and never was: it only holds while the disk
 // fits inside the square. At r = 0.52 it claims 85% and the real figure is
@@ -123,10 +124,10 @@ export const GOAL_GRID = 3;
 // Aim position matters more than the overall figure suggests. Measured for a
 // shot aimed at exactly one point, keeper uniform, 4000x4000 grid:
 //
-//   point              r=0.52   r=0.47   r=0.44   r=0.40
-//   dead centre        83.4%    69.4%    60.8%    50.3%
-//   edge midpoint      42.1%    34.7%    30.4%    25.1%
-//   corner             21.2%    17.3%    15.2%    12.6%
+//   point              r=0.52   r=0.47   r=0.44   r=0.40   r=0.38
+//   dead centre        83.4%    69.4%    60.8%    50.3%    45.4%
+//   edge midpoint      42.1%    34.7%    30.4%    25.1%    22.7%
+//   corner             21.2%    17.3%    15.2%    12.6%    11.3%
 //
 // Note the two tables answer different questions and neither is a correction
 // of the other: the first averages over every shot the striker could pick, the
@@ -134,26 +135,26 @@ export const GOAL_GRID = 3;
 // the second kind of number without saying so.
 //
 // The radius is one scalar, so it cannot be tuned per corner. What a smaller
-// radius does for the corners is lower the floor, and at 0.40 a corner is worth
-// only an eighth of saves while dead centre is still half, which is what makes
-// aiming feel like a real decision rather than a formality. The two steps
-// below are measured too, in case playtesting keeps going in the same
+// radius does for the corners is lower the floor, and at 0.38 a corner is worth
+// about a ninth of saves while dead centre is still under half, which is what
+// makes aiming feel like a real decision rather than a formality. The step
+// below is measured too, in case playtesting keeps going in the same
 // direction:
 //
 //   r      overall   centre third   corner    dead centre   corner point
 //   0.35     27.8%       38.3%      23.1%       38.5%         9.6%
 //   0.30     21.4%       28.1%      18.4%       28.3%         7.1%
 //
-// The radius has come down 0.52 -> 0.47 -> 0.44 -> 0.40 across three rounds of
-// playtesting, every one of them for the same reason: the keeper read as
-// saving from too wide an area, dead centre above all, and the corners were
+// The radius has come down 0.52 -> 0.47 -> 0.44 -> 0.40 -> 0.38 across four
+// rounds of playtesting, every one of them for the same reason: the keeper read
+// as saving from too wide an area, dead centre above all, and the corners were
 // still being reached too often. Nothing else in the game reads this constant,
 // so each of those rounds was a one-line change.
 //
 // The geometry is symmetric, so neither role has an advantage. Checked by
 // comparing each cell against its reflection: the largest gap is 0.6pp over
-// 400k pairs, which is sampling noise.
-export const DIVE_RADIUS = 0.40;
+// 400k pairs, which is sampling noise rather than a real lean.
+export const DIVE_RADIUS = 0.38;
 
 // Centre of a 3x3 goal cell, as { x, y } in 0-1 goal space.
 export function cellCenter(zone) {
