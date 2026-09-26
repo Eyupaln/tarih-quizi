@@ -50,9 +50,6 @@
     opponentAttemptDots: $("#opponentAttemptDots"),
     youAttemptCount: $("#youAttemptCount"),
     opponentAttemptCount: $("#opponentAttemptCount"),
-    roleBanner: $("#roleBanner"),
-    roleBannerIcon: $("#roleBannerIcon"),
-    roleTitle: $("#roleTitle"),
     roleTimer: $("#roleTimer"),
     pitch: $("#pitch"),
     goalFrame: $("#goalFrame"),
@@ -185,7 +182,18 @@
   let toastTimer = null;
   let roundTimer = null;
   let countdownTimers = [];
-  let resolveTimer = null;
+  // Match-scoped timeouts that must all be cancellable at once. Shot resolution
+  // nests two setTimeouts, and a single handle could only ever point at the
+  // inner one, so the outer one kept running after the match had moved on.
+  const trackedTimeouts = new Set();
+  function trackTimeout(callback, delayMs) {
+    const id = window.setTimeout(() => {
+      trackedTimeouts.delete(id);
+      callback();
+    }, delayMs);
+    trackedTimeouts.add(id);
+    return id;
+  }
   let scoreFeedbackTimer = null;
   let shotSoundTimer = null;
   let audioContext = null;
@@ -237,21 +245,21 @@
 
   function clearMatchTimers() {
     if (roundTimer) window.clearInterval(roundTimer);
-    if (resolveTimer) window.clearTimeout(resolveTimer);
+    trackedTimeouts.forEach((timer) => window.clearTimeout(timer));
+    trackedTimeouts.clear();
     if (scoreFeedbackTimer) window.clearTimeout(scoreFeedbackTimer);
     if (shotSoundTimer) window.clearTimeout(shotSoundTimer);
     countdownTimers.forEach((timer) => window.clearTimeout(timer));
     roundTimer = null;
-    resolveTimer = null;
     scoreFeedbackTimer = null;
     shotSoundTimer = null;
     countdownTimers = [];
     if (els.scoreFeedback) {
-      els.scoreFeedback.classList.remove("is-visible", "score-feedback--goal", "score-feedback--save", "score-feedback--miss", "score-feedback--conceded");
+      els.scoreFeedback.classList.remove("is-visible", "score-feedback--goal", "score-feedback--save", "score-feedback--conceded");
       els.scoreFeedback.textContent = "";
     }
     [els.youScore, els.opponentScore].forEach((score) => score?.classList.remove("score-pop"));
-    if (els.matchScoreboard) els.matchScoreboard.classList.remove("is-goal", "is-save", "is-miss", "is-conceded");
+    if (els.matchScoreboard) els.matchScoreboard.classList.remove("is-goal", "is-save", "is-conceded");
   }
 
   function hideOverlays() {
@@ -494,11 +502,12 @@
   let realtimeMatchActive = false;
   let realtimeFinishedShown = false;
 
+  // The server resolves a round to exactly one of two outcomes: isSaved() is a
+  // boolean, so "goal" and "save" are the only results that exist. The miss
+  // branch that used to live here was unreachable and has been removed; a real
+  // miss outcome is a separate decision for whoever adds out-of-goal targeting.
   function normalizeRealtimeResult(result) {
-    if (result === "GOL") return "goal";
-    if (result === "KURTARDI") return "save";
-    if (result === "KACIRDI" || result === "MISS") return "miss";
-    return "goal";
+    return result === "KURTARDI" ? "save" : "goal";
   }
 
   function buildRealtimeMatchState(room, payload = {}) {
@@ -728,10 +737,10 @@
     const keeperAim = { type: "goal", cell: kaleciZone };
     els.opponentStatusText.textContent = "Vuruş sonucu açıklanıyor…";
     playSound("whistle", 0.8);
-    resolveTimer = window.setTimeout(() => {
+    trackTimeout(() => {
       if (state.match !== match) return;
       animateShot(shot, keeperAim, result);
-      resolveTimer = window.setTimeout(() => {
+      trackTimeout(() => {
         if (state.match !== match) return;
         match.phase = "result";
         const strikerIndex = forvetIsYou ? 0 : 1;
@@ -824,7 +833,7 @@
     renderMatch();
     const eventName = match.youRole === "forvet" ? "shot:submit" : "save:submit";
     try {
-      const response = await window.PenaltiShared.emitWithAck(eventName, { x, y });
+      const response = await window.PenaltiShared.emitWithAck(eventName, { x, y, round: match.round });
       if (!response?.ok) {
         const error = new Error(response?.error?.message || "Seçimin gönderilemedi.");
         error.code = response?.error?.code;
@@ -837,6 +846,12 @@
         // The server already filled the target in, so the round is over for us.
         // The round:result that follows carries the auto-picked notice.
         showToast("Süre doldu, hedefin otomatik seçildi.", "orange");
+        return;
+      }
+      if (error.code === "STALE_ROUND") {
+        // Our input belonged to a round that has already moved on. The aim is
+        // kept so the player can simply press again if the round is still live.
+        showToast(error.message || "Bu vuruş eski bir tura ait.", "orange");
         return;
       }
       showToast(error.message || "Seçimin gönderilemedi.", "orange");
@@ -1125,19 +1140,18 @@
     const labels = {
       goal: userScored ? "GOL!" : "GOL YEDİN+!",
       save: userSaved ? "KURTARDIN!" : "KURTARDI!",
-      miss: "KAÇIRDI!",
     };
     window.clearTimeout(scoreFeedbackTimer);
     els.scoreFeedback.textContent = labels[result] || "";
-    els.scoreFeedback.classList.remove("is-visible", "score-feedback--goal", "score-feedback--save", "score-feedback--miss", "score-feedback--conceded");
+    els.scoreFeedback.classList.remove("is-visible", "score-feedback--goal", "score-feedback--save", "score-feedback--conceded");
     els.scoreFeedback.classList.add("is-visible", `score-feedback--${tone}`);
     if (els.matchScoreboard) {
-      els.matchScoreboard.classList.remove("is-goal", "is-save", "is-miss", "is-conceded");
+      els.matchScoreboard.classList.remove("is-goal", "is-save", "is-conceded");
       els.matchScoreboard.classList.add(`is-${tone}`);
     }
     scoreFeedbackTimer = window.setTimeout(() => {
       els.scoreFeedback.classList.remove("is-visible");
-      if (els.matchScoreboard) els.matchScoreboard.classList.remove("is-goal", "is-save", "is-miss", "is-conceded");
+      if (els.matchScoreboard) els.matchScoreboard.classList.remove("is-goal", "is-save", "is-conceded");
       scoreFeedbackTimer = null;
     }, 950);
   }
@@ -1168,16 +1182,12 @@
     els.roundCurrent.textContent = String(currentAttempt);
     els.roundTotal.textContent = totalLabel;
     els.roundLabel.textContent = attemptText;
-    if (els.roleBanner) els.roleBanner.classList.toggle("role-banner--keeper", !striker);
-    if (els.roleBannerIcon) els.roleBannerIcon.innerHTML = materialIcon(striker ? "sports_soccer" : "sports_handball");
-    if (els.roleTitle) els.roleTitle.textContent = striker ? "FORVET" : "KALECİ";
     els.pitch.classList.toggle("pitch--keeper", !striker);
     els.tapLabel.textContent = striker ? "VUR" : "KURTAR";
     els.ballHandle.setAttribute("aria-label", striker ? "Vuruş topu" : "Kurtarış topu");
     const hasAim = Boolean(match.userAim);
-    els.pitchBadge.classList.toggle("is-miss", Boolean(hasAim && match.userAim.type === "miss"));
     els.pitchBadge.textContent = hasAim
-      ? (match.userAim.type === "miss" ? "KALE DIŞI!" : striker ? "HEDEF KİLİTLENDİ" : "DİVE KİLİTLENDİ")
+      ? (striker ? "HEDEF KİLİTLENDİ" : "DİVE KİLİTLENDİ")
       : (striker ? "VURUŞU GÖNDER" : "KURTAR");
     els.gestureHint.classList.toggle("is-hidden", hasAim || match.userConfirmed);
     els.ballHandle.classList.toggle("is-confirmed", match.userConfirmed);
@@ -1226,7 +1236,7 @@
   function renderDots(container, attempts, isCurrentSide) {
     const total = 5;
     const visibleAttempts = attempts.slice(-total);
-    const resultLabels = { goal: "Gol", save: "Kurtarış", miss: "Kaçırma" };
+    const resultLabels = { goal: "Gol", save: "Kurtarış" };
     const usedCount = attempts.length > total ? `${total}+` : `${attempts.length}/${total}`;
     if (isCurrentSide && els.youAttemptCount) els.youAttemptCount.textContent = usedCount;
     if (!isCurrentSide && els.opponentAttemptCount) els.opponentAttemptCount.textContent = usedCount;
@@ -1253,7 +1263,7 @@
   function resetPitchVisuals() {
     els.pitch.classList.remove("is-resolving");
     els.keeper.className = "keeper";
-    els.football.classList.remove("is-flight", "is-flight--goal", "is-flight--miss", "is-flight--save");
+    els.football.classList.remove("is-flight", "is-flight--goal", "is-flight--save");
     els.football.style.removeProperty("--flight-x");
     els.football.style.removeProperty("--flight-y");
     els.football.style.transform = "";
@@ -1271,12 +1281,6 @@
     const pitchRect = els.pitch.getBoundingClientRect();
     const goalRect = goalRectForAim();
     if (!aim) return { x: pitchRect.width / 2, y: pitchRect.height * 0.29 };
-    if (aim.type === "miss") {
-      return {
-        x: Math.max(10, Math.min(pitchRect.width - 10, (aim.x || 0.5) * pitchRect.width)),
-        y: Math.max(10, Math.min(pitchRect.height - 10, (aim.y || 0.15) * pitchRect.height)),
-      };
-    }
     // Continuous aim from the local player.
     if (aim.x !== undefined && aim.y !== undefined) {
       return {
@@ -1334,7 +1338,7 @@
 
   function renderAimMarker(aim) {
     if (!els.aimMarker) return;
-    const point = aim && aim.type !== "miss" ? aim : null;
+    const point = aim || null;
     if (!point || point.x === undefined) {
       els.aimMarker.hidden = true;
       return;
@@ -1350,20 +1354,15 @@
     if (!match || match.phase !== "aim" || match.userConfirmed) return;
     match.userAim = aim;
     renderAimMarker(aim);
-    els.pitchBadge.classList.toggle("is-miss", aim.type === "miss");
-    els.pitchBadge.textContent = aim.type === "miss"
-      ? "KALE DIŞI!"
-      : userIsStriker() ? "HEDEF SEÇİLDİ" : "DİVE NOKTASI";
+    els.pitchBadge.textContent = userIsStriker() ? "HEDEF SEÇİLDİ" : "DİVE NOKTASI";
     els.ballHandle.setAttribute(
       "aria-valuetext",
-      aim.type === "miss"
-        ? "Kale dışı hedef"
-        : `Hedef yatay %${Math.round(aim.x * 100)}, dikey %${Math.round(aim.y * 100)}`,
+      `Hedef yatay %${Math.round(aim.x * 100)}, dikey %${Math.round(aim.y * 100)}`,
     );
     els.gestureHint.classList.add("is-hidden");
     updateTrajectory(aim);
     renderMatch();
-    playTone(aim.type === "miss" ? 260 : 480, 0.045, "triangle");
+    playTone(480, 0.045, "triangle");
   }
 
   function confirmUserAction() {
@@ -1416,6 +1415,10 @@
     });
   }
 
+  // Local demo resolution. This path is currently unreachable: the only caller
+  // guards on match.botConfirmed, which is only ever set by the realtime
+  // shot:waiting event, and that handler returns early outside a room match. It
+  // is kept, and kept honest, for when the demo is wired up again.
   function resolveRound() {
     const match = state.match;
     if (!match) return;
@@ -1423,8 +1426,7 @@
     const shot = userIsStriker() ? match.userAim : match.botAim;
     const keeperAim = userIsStriker() ? match.botAim : match.userAim;
     let result = "goal";
-    if (!shot || shot.type === "miss") result = "miss";
-    else if (keeperAim?.type !== "miss" && Number(shot.cell) === Number(keeperAim.cell)) result = "save";
+    if (shot && keeperAim && Number(shot.cell) === Number(keeperAim.cell)) result = "save";
 
     match.lastResult = { result, shot, keeperAim };
     animateShot(shot, keeperAim, result);
@@ -1474,7 +1476,7 @@
 
   function setKeeperAnimation(aim) {
     els.keeper.className = "keeper";
-    if (!aim || aim.type === "miss") return;
+    if (!aim) return;
     // Continuous aim maps onto the same nine dive directions by thirds, so at
     // a cell centre the animation is identical to the discrete version.
     let column;
@@ -1512,10 +1514,6 @@
       title = "GOL YEDİM!";
       message = "Rakip golü ağlara götürdü.";
       icon = "sports_soccer";
-    } else if (result === "miss") {
-      title = userStriker ? "KAÇIRDI!" : "RAKİP KAÇIRDI!";
-      message = userStriker ? "Şut dışarı gitti." : "Rakip şutu dışarı gitti.";
-      icon = "near_me";
     }
     const regularComplete = !match.suddenDeath && match.round >= 10;
     const suddenPairComplete = match.suddenDeath && match.round % 2 === 0;

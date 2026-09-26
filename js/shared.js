@@ -200,32 +200,11 @@
     return String(value ?? "").toUpperCase().replace(/[^2-9A-HJ-NP-Z]/g, "").slice(0, 6);
   }
 
-  // Centre of a 3x3 goal cell, in normalised 0-1 goal space.
-  // Mirrors cellCenter() in server.js, which is the source of truth. The two
-  // runtimes cannot share a module here, so a test checks them against each
-  // other.
-  const GOAL_GRID = 3;
-
-  // Number(null), Number(""), Number([]) and Number(true) all pass
-  // Number.isInteger, so a bare coercion would quietly answer cell 0 for
-  // missing input. Mirrors the server's own toFiniteNumber.
-  function toFiniteNumber(value) {
-    const kind = typeof value;
-    if (kind !== "number" && kind !== "string") return null;
-    if (kind === "string" && value.trim() === "") return null;
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  function goalCellCenter(zone) {
-    const index = toFiniteNumber(zone);
-    if (index === null || !Number.isInteger(index) || index < 0 || index >= GOAL_GRID * GOAL_GRID) return null;
-    const step = 1 / GOAL_GRID;
-    return {
-      x: ((index % GOAL_GRID) + 0.5) * step,
-      y: (Math.floor(index / GOAL_GRID) + 0.5) * step,
-    };
-  }
+  // goalCellCenter and its private GOAL_GRID/toFiniteNumber helpers were removed
+  // here. They mirrored cellCenter() in server.js so a client could turn a
+  // discrete zone into a goal point, which was the shape the nine-button grid
+  // used. The client now sends continuous { x, y } and never computes a cell
+  // centre, so nothing here called them.
 
   function getRoomState() {
     try {
@@ -624,7 +603,6 @@
     leaveRoom,
     randomRoomCode,
     normalizeRoomCode,
-    goalCellCenter,
     getRoomState,
     setRoomState,
     clearRoomState,

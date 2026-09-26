@@ -1332,87 +1332,6 @@ body.is-loading {
   content: "";
 }
 
-.round-dot--miss {
-  border-color: rgba(255, 138, 61, 0.75);
-  background: rgba(255, 109, 0, 0.13);
-}
-
-.round-dot--miss::after {
-  position: absolute;
-  top: 3px;
-  left: 1px;
-  width: 6px;
-  height: 1px;
-  background: var(--orange-bright);
-  box-shadow: 0 0 4px rgba(255, 109, 0, 0.55);
-  content: "";
-  transform: rotate(-45deg);
-}
-
-.role-banner__copy {
-  min-width: 0;
-}
-
-.role-banner__copy .eyebrow {
-  color: #7f9cad;
-  font-size: 9px;
-}
-
-.role-banner {
-  display: grid;
-  grid-template-columns: 35px 1fr auto;
-  align-items: center;
-  gap: 10px;
-  min-height: 58px;
-  margin: 8px 0;
-  padding: 9px 12px;
-  border: 1px solid rgba(0, 255, 102, 0.2);
-  border-radius: 16px;
-  background: linear-gradient(100deg, rgba(0, 255, 102, 0.14), rgba(0, 255, 102, 0.035));
-  transition: border-color 200ms ease, background 200ms ease;
-}
-
-.role-banner--keeper {
-  border-color: rgba(255, 109, 0, 0.25);
-  background: linear-gradient(100deg, rgba(255, 109, 0, 0.15), rgba(255, 109, 0, 0.035));
-}
-
-.role-banner-icon {
-  display: grid;
-  width: 35px;
-  height: 35px;
-  place-items: center;
-  border-radius: 11px;
-  background: rgba(0, 255, 102, 0.16);
-  font-size: 18px;
-}
-
-.role-banner--keeper .role-banner-icon {
-  background: rgba(255, 109, 0, 0.16);
-}
-
-.role-banner strong {
-  display: block;
-  margin-top: 4px;
-  color: var(--green-bright);
-  font-size: 20px;
-  font-weight: 900;
-  letter-spacing: 0.06em;
-  line-height: 1;
-  text-shadow: 0 0 12px rgba(0, 255, 102, 0.18);
-}
-
-.role-banner--keeper strong {
-  color: var(--orange-bright);
-  text-shadow: 0 0 12px rgba(255, 109, 0, 0.22);
-}
-
-.role-timer {
-  color: #6c8797;
-  font-family: var(--font-mono);
-  font-size: 10px;
-}
-
 .pitch {
   position: relative;
   height: 430px;
@@ -1899,12 +1818,6 @@ body.is-loading {
   pointer-events: none;
 }
 
-.pitch-badge.is-miss {
-  color: #ffb181;
-  border-color: rgba(255, 109, 0, 0.3);
-  background: rgba(62, 25, 12, 0.72);
-}
-
 .pitch--keeper .goal-frame {
   border-color: rgba(255, 183, 115, 0.72);
 }
@@ -1971,10 +1884,6 @@ body.is-loading {
 
 .football.is-flight--goal {
   transform: translate(calc(-50% + var(--flight-x)), calc(-50% + var(--flight-y))) rotate(520deg) scale(0.72);
-}
-
-.football.is-flight--miss {
-  transform: translate(calc(-50% + var(--flight-x)), calc(-50% + var(--flight-y))) rotate(380deg) scale(0.62);
 }
 
 .football.is-flight--save {
@@ -2730,14 +2639,6 @@ body.is-loading {
   background: var(--orange);
 }
 
-.result-card--miss {
-  border-color: rgba(255, 109, 0, 0.3);
-}
-
-.result-card--miss::before {
-  background: var(--red);
-}
-
 .result-card--conceded {
   border-color: rgba(255, 77, 90, 0.42);
 }
@@ -2801,11 +2702,6 @@ body.is-loading {
   background: rgba(255, 109, 0, 0.13);
 }
 
-.result-card--miss .result-icon {
-  border-color: rgba(255, 109, 0, 0.3);
-  background: rgba(255, 109, 0, 0.13);
-}
-
 .result-card .eyebrow {
   position: relative;
   color: #81a1ae;
@@ -2823,10 +2719,6 @@ body.is-loading {
 
 .result-card--save h2 {
   color: var(--orange-bright);
-}
-
-.result-card--miss h2 {
-  color: #FF6D00;
 }
 
 .result-card p {
@@ -2892,11 +2784,6 @@ body.is-loading {
 .result-card--save .result-primary {
   color: #2b1200;
   background: var(--orange);
-}
-
-.result-card--miss .result-primary {
-  color: #fff;
-  background: var(--red);
 }
 
 .result-secondary {
@@ -3767,7 +3654,6 @@ body.is-loading {
 }
 
 .match-scoreboard,
-.role-banner,
 .pitch,
 .opponent-status,
 .result-card,
@@ -3921,12 +3807,6 @@ body.is-loading {
   background: rgba(48, 22, 10, 0.9);
 }
 
-.score-center .score-feedback--miss {
-  border-color: rgba(255, 138, 61, 0.42);
-  color: #ffc09a;
-  background: rgba(39, 19, 12, 0.9);
-}
-
 .score-center .score-feedback--conceded {
   border-color: rgba(255, 77, 90, 0.58);
   color: #ff737b;
@@ -3961,21 +3841,6 @@ body.is-loading {
 .round-copy strong {
   font-family: var(--font-score);
   font-size: 18px;
-}
-
-.role-banner {
-  border-left: 3px solid var(--green);
-  border-radius: 5px;
-  background: var(--navy);
-}
-
-.role-banner--keeper {
-  border-left-color: var(--orange);
-  background: #252d36;
-}
-
-.role-banner-icon {
-  border-radius: 5px;
 }
 
 .pitch {
@@ -4083,10 +3948,6 @@ body.is-loading {
 }
 
 .result-card--save {
-  border-color: rgba(255, 109, 0, 0.4);
-}
-
-.result-card--miss {
   border-color: rgba(255, 109, 0, 0.4);
 }
 

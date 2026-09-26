@@ -161,8 +161,20 @@ export function nearestCell(target) {
 }
 
 // Single internal target format: { x, y, zone } in normalised goal space.
-// Accepts the continuous { x, y } payload and, for backwards compatibility
-// with clients that have not been redeployed yet, the old { zone } payload.
+//
+// The { zone } branch below is LEGACY and no current client reaches it. The
+// continuous { x, y } payload has been the only thing js/game.js has sent
+// since 9cab770 ("Move the shot contract to continuous goal coordinates"),
+// which shipped the protocol change, and 44fbee1 ("Replace the nine cell
+// buttons with continuous aiming") removed the nine buttons that produced a
+// zone in the first place. So nothing in this repository exercises it any more.
+//
+// It is kept only so a browser still holding a pre-9cab770 game.js can finish
+// its match instead of failing every shot with INVALID_TARGET. There is no
+// cache-control header on the static assets, so a stale client can outlive a
+// deploy by a few days. Remove normalizeZone, cellCenter and this branch once
+// that window has passed; they are five lines, and until then they are the
+// difference between a laggy client and a broken one.
 export function normalizeTarget(payload) {
   if (!payload || typeof payload !== "object") return null;
 
@@ -609,8 +621,11 @@ function sweepRound(room) {
     return player && player.connected === false;
   });
   if (disconnected) return;
+  // At least one side is always still null here. The deadline is armed once per
+  // round by beginRoundWindow, and resolveRound clears it the moment the second
+  // shot lands, so a round with both shots in has no armed timer left to fire.
+  // resolveRound re-checks this anyway, so an empty list is handled there.
   const missing = ["forvet", "kaleci"].filter((role) => room.pendingShots[role] === null);
-  if (missing.length === 0) return;
   missing.forEach((role) => {
     room.pendingShots[role] = normalizeTarget(randomTarget());
   });
@@ -715,6 +730,18 @@ function handleShot(socket, kind, payload, ack) {
   const player = getPlayerForSocket(socket, room);
   const expectedRole = kind === "shot:submit" ? "forvet" : "kaleci";
   const isMyTurn = Boolean(player) && player.role === expectedRole;
+
+  // A shot names the round it was aimed in. The roles alternate every round, so
+  // a shot buffered or retried from an earlier round lands on a player whose
+  // role matches again two rounds later and would be accepted as their own.
+  // Checked leniently: a client that sends no round at all is still allowed,
+  // so a stale cached client keeps working, but a wrong one is refused rather
+  // than silently scored.
+  const claimedRound = toFiniteNumber(payload?.round);
+  if (claimedRound !== null && claimedRound !== room.match.round) {
+    reply(ack, { ok: false, error: { code: "STALE_ROUND", message: "Bu vuruş eski bir tura ait, tekrar dene." } });
+    return;
+  }
 
   // Checked before the round state gate, so a player who was too slow always
   // gets the same clear reason. Once the sweep has resolved the round the
