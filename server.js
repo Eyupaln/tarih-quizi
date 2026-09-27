@@ -251,6 +251,8 @@ function createRoom() {
     pendingShots: { forvet: null, kaleci: null },
     pendingNext: false,
     lastResult: null,
+    readyIds: [],
+    kickoffBegun: false,
     createdAt: Date.now(),
   };
   rooms.set(code, room);
@@ -328,6 +330,8 @@ function scheduleDisconnectCleanup(room, player) {
 function finishAfterPlayerRemoval(room, player) {
   if (room.status !== "in_progress") return;
   room.status = "finished";
+  // The match is over, so nothing should be left waiting to start a round.
+  clearKickoffTimer(room.code);
   io.to(room.code).emit("opponent:left", {
     playerId: player.id,
     nickname: player.nickname,
@@ -356,6 +360,7 @@ function removePlayer(room, player, reason = "left") {
   if (room.hostId === player.id) room.hostId = room.players[0]?.id || null;
 
   if (room.players.length === 0) {
+    clearKickoffTimer(room.code);
     rooms.delete(room.code);
     return;
   }
@@ -484,6 +489,8 @@ function startMatch(room) {
   room.match = createMatch();
   room.pendingShots = { forvet: null, kaleci: null };
   room.pendingNext = false;
+  resetKickoff(room);
+  armKickoffCap(room);
   const roles = assignRoles(room);
   const response = {
     ok: true,
@@ -514,10 +521,57 @@ function resolveGoldenPair(room) {
   return rolesForRound(room, goals[0].round)?.forvetId ?? null;
 }
 
-// announceRound used to live here and reset the round's deadline and its
-// acknowledgement set. Both are gone, so a round now needs no per-round state
-// reset at all: it opens on match:started or the next round:ready, and the only
-// thing that closes it is resolveRound.
+// Match kickoff. The 3-2-1 happens once, at the start of the match, after both
+// players have drawn the pitch. It is not a per-round thing: every round after
+// the first starts the moment it is announced, and no round has a clock, so
+// there is nothing for a countdown to interrupt. kickoffBegun is the latch that
+// makes it once, and it is deliberately never cleared during a match.
+//
+// The cap exists only so a player who never reports ready cannot wedge the
+// other one. It does the same thing as the real trigger, just later.
+const KICKOFF_CAP_MS = 5000;
+const kickoffTimers = new Map();
+
+function everyoneReady(room) {
+  return room.players.length > 0 && room.players.every((player) => room.readyIds.includes(player.id));
+}
+
+function clearKickoffTimer(code) {
+  const timer = kickoffTimers.get(code);
+  if (!timer) return;
+  clearTimeout(timer);
+  kickoffTimers.delete(code);
+}
+
+function resetKickoff(room) {
+  clearKickoffTimer(room.code);
+  room.readyIds = [];
+  room.kickoffBegun = false;
+}
+
+// Armed with the match, not with each round, because a report can legitimately
+// arrive before the room is in progress and be ignored. Arming it here means
+// the countdown cannot be lost waiting for a report that will never be
+// accepted.
+function armKickoffCap(room) {
+  if (!room || room.kickoffBegun || kickoffTimers.has(room.code)) return;
+  const timer = setTimeout(() => {
+    kickoffTimers.delete(room.code);
+    beginKickoff(room);
+  }, KICKOFF_CAP_MS);
+  kickoffTimers.set(room.code, timer);
+}
+
+// Starts the countdown for everyone. Idempotent: the cap and the real trigger
+// can both reach this, and whoever arrives second must not restart the count.
+function beginKickoff(room) {
+  if (!room || room.status !== "in_progress" || room.pendingNext || room.kickoffBegun) return false;
+  room.kickoffBegun = true;
+  clearKickoffTimer(room.code);
+  io.to(room.code).emit("round:begin", { ok: true, round: room.match.round, room: publicRoom(room) });
+  return true;
+}
+
 
 // One shape for every round announcement, so the acknowledgement path and the
 // advance path cannot drift apart.
@@ -820,6 +874,7 @@ io.on("connection", (socket) => {
     room.pendingShots = { forvet: null, kaleci: null };
     room.pendingNext = false;
     room.lastResult = null;
+    resetKickoff(room);
     room.players.forEach((candidate) => {
       candidate.ready = false;
       candidate.role = null;
@@ -831,6 +886,30 @@ io.on("connection", (socket) => {
 
   socket.on("shot:submit", (payload = {}, ack) => handleShot(socket, "shot:submit", payload, ack));
   socket.on("save:submit", (payload = {}, ack) => handleShot(socket, "save:submit", payload, ack));
+
+  // "I have drawn this round." Reported once per player per round; when everyone
+  // has reported, the room counts down together. Named round:drawn rather than
+  // round:ready because round:ready already means the opposite direction, the
+  // server announcing a round to the room. Compared with toFiniteNumber rather
+  // than Number() because Number(true) is 1 and Number([5]) is 5, so a malformed
+  // round would otherwise match round 1 or round 5 by accident.
+  socket.on("round:drawn", (payload = {}, ack) => {
+    const room = getRoomForSocket(socket);
+    const player = getPlayerForSocket(socket, room);
+    if (!room || !player || room.status !== "in_progress" || room.pendingNext) {
+      reply(ack, { ok: true, ignored: true });
+      return;
+    }
+    if (toFiniteNumber(payload?.round) !== room.match.round) {
+      reply(ack, { ok: true, ignored: true });
+      return;
+    }
+    if (!room.readyIds.includes(player.id)) room.readyIds.push(player.id);
+    if (!room.kickoffBegun) {
+      if (everyoneReady(room)) beginKickoff(room);
+    }
+    reply(ack, { ok: true, round: room.match.round, ready: room.readyIds.length });
+  });
 
   // round:ack used to live here. It was "I have the round and I have drawn it",
   // and the only thing the server did with it was hold the round's clock back
@@ -846,7 +925,9 @@ io.on("connection", (socket) => {
       return;
     }
     // A replayed response describes a round the other player already started, so
-    // it must not re-announce the round to the whole room.
+    // it must not re-announce the round to the whole room. No kickoff cap here
+    // on purpose: the countdown belongs to the start of the match, and this
+    // runs for every round of it.
     const buildResponse = (replayed) => roundReadyPayload(room, replayed);
 
     // Both players press the result button. The first one advances the round;

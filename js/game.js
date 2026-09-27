@@ -584,6 +584,15 @@
         showRealtimeFinished(payload);
       }
     });
+    // round:begin is the server saying both players have drawn the pitch, so the
+    // match counts down together. It fires once per match, not once per round.
+    // It is a start signal, not a deadline: nothing here closes a round or fills
+    // in a move, and after the count every round waits for as long as it takes.
+    shared.onSocket("round:begin", (payload) => {
+      if (!state.realtime || !state.match) return;
+      if (state.match.kickoff === false) return;
+      runKickoffCountdown();
+    });
     // opponent:disconnected is intentionally not handled here: opponent:left
     // fires right after it and drives the full screen card.
     shared.onSocket("room:playerReconnected", (payload) => {
@@ -640,6 +649,8 @@
       userConfirmed: false,
       botConfirmed: false,
       startedAt: Date.now(),
+      kickoff: true,
+      readyReportedRound: 0,
       tournamentIndex: null,
       tournamentRecorded: false,
       lastResult: null,
@@ -650,6 +661,10 @@
     window.PenaltiShared?.stopMenuMusic?.();
     startCrowdAmbience();
     beginRound(payload);
+    // Reported here rather than from beginRound, because the countdown belongs
+    // to the start of the match and not to every round of it. beginRound runs
+    // once per round; this runs once per match.
+    reportRoundReady();
   }
 
   function updateRealtimeRound(payload = {}) {
@@ -784,7 +799,7 @@
 
   async function confirmRealtimeUserAction() {
     const match = state.match;
-    if (!match || match.phase !== "aim" || match.userConfirmed) return;
+    if (!match || match.phase !== "aim" || match.userConfirmed || match.kickoff) return;
     const x = Number(match.userAim?.x);
     const y = Number(match.userAim?.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
@@ -983,8 +998,7 @@
     if (!opponentIsGone()) closeOpponentLeftCard();
     resetPitchVisuals();
     renderMatch();
-    const status = userIsStriker() ? "Rakip kaleyi savunuyor…" : "Rakip şutunu hazırlıyor…";
-    els.opponentStatusText.textContent = status;
+    els.opponentStatusText.textContent = userIsStriker() ? "Rakip kaleyi savunuyor…" : "Rakip şutunu hazırlıyor…";
     els.statusPulse.classList.remove("is-ready");
   }
 
@@ -1077,15 +1091,19 @@
     }
     els.roundHint.textContent = striker ? "İki buton da basılı olmalı" : "İki buton da basılı olmalı";
     updatePowerMeter(match.userAim, striker);
-    els.confirmButton.innerHTML = match.userConfirmed
-      ? `OYUNCU BEKLENİYOR…`
-      : striker
-        ? `VURUŞU GÖNDER ${materialIcon("arrow_forward")}`
-        : `KURTAR ${materialIcon("arrow_forward")}`;
+    els.confirmButton.innerHTML = match.kickoff
+      ? `HAZIR OL…`
+      : match.userConfirmed
+        ? `OYUNCU BEKLENİYOR…`
+        : striker
+          ? `VURUŞU GÖNDER ${materialIcon("arrow_forward")}`
+          : `KURTAR ${materialIcon("arrow_forward")}`;
     els.confirmButton.classList.toggle("confirm-button--keeper", !striker);
-    els.confirmButton.disabled = match.phase !== "aim" || match.userConfirmed || !match.userAim;
+    els.confirmButton.disabled = match.phase !== "aim" || match.userConfirmed || !match.userAim || match.kickoff;
     els.opponentStatusAvatar.innerHTML = materialIcon(opponent.avatar);
-    els.opponentStatusText.textContent = match.userConfirmed && match.botConfirmed
+    els.opponentStatusText.textContent = match.kickoff
+      ? "Rakip hazırlanıyor…"
+      : match.userConfirmed && match.botConfirmed
       ? "İki oyuncu hazır!"
       : match.userConfirmed
         ? "Oyuncu bekleniyor…"
@@ -1215,7 +1233,7 @@
 
   function setAim(aim) {
     const match = state.match;
-    if (!match || match.phase !== "aim" || match.userConfirmed) return;
+    if (!match || match.phase !== "aim" || match.userConfirmed || match.kickoff) return;
     match.userAim = aim;
     renderAimMarker(aim);
     els.pitchBadge.textContent = userIsStriker() ? "HEDEF SEÇİLDİ" : "DİVE NOKTASI";
@@ -1247,6 +1265,85 @@
     playTone(720, 0.1, "square");
     renderMatch();
     maybeStartCountdown();
+  }
+
+  // Kickoff. Runs once, at the start of the match. While match.kickoff is true
+  // the aim surface ignores input and the confirm button stays disabled, so both
+  // players are looking at the same 3-2-1 before either of them can act. It is
+  // cleared when the count finishes and never set again, so the rounds after
+  // the first start with no ceremony at all.
+  function runKickoffCountdown() {
+    const match = state.match;
+    if (!match) return;
+    match.kickoff = true;
+    renderMatch();
+    playSound("whistle", 0.8);
+    els.countdownOverlay.hidden = false;
+    const sequence = [
+      { number: "3", word: "HAZIR OL", duration: 620 },
+      { number: "2", word: "HAZIR OL", duration: 520 },
+      { number: "1", word: "HAZIR OL", duration: 520 },
+      { number: "VUR!", word: "ŞUT!", duration: 580 },
+    ];
+    countdownTimers.forEach((timer) => window.clearTimeout(timer));
+    countdownTimers = [];
+    sequence.forEach((item, index) => {
+      const timer = window.setTimeout(() => {
+        if (state.match !== match) return;
+        els.countdownNumber.textContent = item.number;
+        els.countdownWord.textContent = item.word;
+        els.countdownNumber.classList.remove("countdown-number--pulse");
+        void els.countdownNumber.offsetWidth;
+        els.countdownNumber.classList.add("countdown-number--pulse");
+        playTone(index === 3 ? 950 : 560 + index * 70, index === 3 ? 0.13 : 0.06, "square");
+        if (index === sequence.length - 1) {
+          els.countdownOverlay.hidden = true;
+          match.kickoff = false;
+          renderMatch();
+        }
+      }, index === 0 ? 80 : sequence.slice(0, index).reduce((sum, entry) => sum + entry.duration, 0));
+      countdownTimers.push(timer);
+    });
+  }
+
+  // "I have drawn the pitch." Reported once per match, and only once the pitch
+  // is actually on screen: acknowledging from behind the loading animation is
+  // how the other player would end up counting down to a page they cannot see.
+  //
+  // The latch is cleared whenever the server does not take the report, and a
+  // few retries are made, because the two players reach game.html at different
+  // times and the first one can easily report before the room is in progress.
+  // Holding the latch through an ignored reply would lose that report and leave
+  // the countdown to the server's cap alone.
+  function reportRoundReady() {
+    const match = state.match;
+    if (!state.realtime || !match) return;
+    if (match.readyReportedRound === match.round) return;
+    const reported = match.round;
+    match.readyReportedRound = reported;
+    let attempts = 0;
+    const send = () => {
+      window.PenaltiShared?.emitWithAck?.("round:drawn", { round: reported })
+        .then((response) => {
+          if (state.match !== match) return;
+          if (response?.ok && !response.ignored) return;
+          // The room had not reached this round yet. Try again shortly; the
+          // server's cap guarantees the countdown happens either way, so this
+          // is only about not making both players wait for it.
+          match.readyReportedRound = 0;
+          if (++attempts < 4) countdownTimers.push(window.setTimeout(() => {
+            if (state.match === match && match.round === reported) reportRoundReady();
+          }, 350));
+        })
+        .catch(() => {
+          if (state.match !== match) return;
+          match.readyReportedRound = 0;
+          if (++attempts < 4) countdownTimers.push(window.setTimeout(() => {
+            if (state.match === match && match.round === reported) reportRoundReady();
+          }, 350));
+        });
+    };
+    send();
   }
 
   function maybeStartCountdown() {
@@ -1902,7 +1999,7 @@
   }
 
   els.aimSurface?.addEventListener("pointerdown", (event) => {
-    if (!state.match || state.match.phase !== "aim" || state.match.userConfirmed) return;
+    if (!state.match || state.match.phase !== "aim" || state.match.userConfirmed || state.match.kickoff) return;
     aimPointerActive = true;
     els.aimSurface.setPointerCapture?.(event.pointerId);
     aimFromPointerEvent(event);
