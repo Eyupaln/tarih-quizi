@@ -13,6 +13,8 @@
   const readyButtonLabel = document.querySelector("#readyButtonLabel");
   const startButton = document.querySelector("#startButton");
   const copyCodeButton = document.querySelector("#copyCodeButton");
+  const shareRoomButton = document.querySelector("#shareRoomButton");
+  const shareStatus = document.querySelector("#shareStatus");
 
   let room = null;
   let starting = false;
@@ -88,13 +90,19 @@
     players.forEach((player) => {
       const isYou = player.id === shared.getPlayerToken();
       const connected = player.connected !== false;
+      const isReady = connected && player.ready;
       const status = !connected ? "BAĞLANTI KOPTU" : player.ready ? "HAZIR" : "BEKLENİYOR";
       const statusClass = !connected ? "slot-status--waiting" : player.ready ? "slot-status--ready" : "slot-status--waiting";
+      const stateClass = isReady ? "player-slot--ready" : "";
+      const stateLabel = !connected ? "bağlantı koptu" : isReady ? "hazır" : "bekleniyor";
+      const statusMarkup = isReady
+        ? `<span class="ready-indicator" aria-hidden="true">${materialIcon("check")}</span>`
+        : `<span class="slot-status ${statusClass}"><i class="status-dot"></i>${status}</span>`;
       slots.push(`
-        <div class="player-slot ${isYou ? "player-slot--you" : ""}" role="listitem">
+        <div class="player-slot ${isYou ? "player-slot--you" : ""} ${stateClass}" role="listitem" aria-label="${shared.escapeHTML(player.nickname || "Oyuncu")}, ${stateLabel}">
           <div class="player-avatar">${materialIcon(isYou ? "sports_soccer" : "person")}</div>
           <div class="player-slot-copy"><strong>${shared.escapeHTML(player.nickname || "OYUNCU")}${isYou ? " · SEN" : ""}</strong><small>${player.isHost ? "Oda sahibi" : "Oyuncu"}</small></div>
-          <span class="slot-status ${statusClass}"><i class="status-dot ${connected && player.ready ? "status-dot--online" : ""}"></i>${status}</span>
+          ${statusMarkup}
         </div>
       `);
     });
@@ -175,6 +183,52 @@
     }, 1400);
   }
 
+  function setShareStatus(message) {
+    if (shareStatus) shareStatus.textContent = message || "";
+  }
+
+  function getJoinUrl() {
+    if (!room?.code) return "";
+    const url = new URL("join-room.html", window.location.href);
+    url.searchParams.set("code", room.code);
+    return url.toString();
+  }
+
+  async function shareRoom() {
+    if (!room?.code || !shareRoomButton) return;
+    const url = getJoinUrl();
+    const text = `Penaltı Düello'ya katıl! Oda kodu: ${room.code}`;
+    setShareStatus("");
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "Penaltı Düello",
+          text,
+          url,
+        });
+        setShareStatus("PAYLAŞILDI");
+        return;
+      } catch (error) {
+        if (error?.name === "AbortError") return;
+      }
+    }
+
+    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(`${text}\n${url}`)}`;
+    const whatsappWindow = window.open(whatsappUrl, "_blank", "noopener,noreferrer");
+    if (whatsappWindow) {
+      setShareStatus("WHATSAPP AÇILDI");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareStatus("BAĞLANTI KOPYALANDI");
+    } catch {
+      setShareStatus(`KOD: ${room.code}`);
+    }
+  }
+
   function waitForSocket() {
     if (shared.isSocketConnected()) return Promise.resolve();
     return new Promise((resolve) => {
@@ -248,6 +302,7 @@
 
     readyButton?.addEventListener("click", toggleReady);
     copyCodeButton?.addEventListener("click", copyRoomCode);
+    shareRoomButton?.addEventListener("click", shareRoom);
     document.querySelectorAll(".lobby-page-actions .back-link, .flow-topline .back-link").forEach((link) => {
       link.addEventListener("click", () => shared.leaveRoom());
     });

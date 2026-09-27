@@ -49,6 +49,12 @@
     if (!shared.requirePlayerName()) return;
     shared.bindSoundToggle();
 
+    const sharedCode = new URLSearchParams(window.location.search).get("code");
+    if (sharedCode && codeInput) {
+      codeInput.value = shared.normalizeRoomCode(sharedCode);
+      window.setTimeout(() => codeInput.focus(), 80);
+    }
+
     codeInput?.addEventListener("input", () => {
       codeInput.value = shared.normalizeRoomCode(codeInput.value);
       if (errorLabel) errorLabel.textContent = "";

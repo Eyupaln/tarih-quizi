@@ -51,10 +51,14 @@
         <div class="room-panel" id="roomPanel">
           <div class="room-panel-top">
             <div><span class="eyebrow">ÖZEL ODA</span><strong class="room-code-display" id="roomCodeLabel">----</strong></div>
-            <button class="copy-button" id="copyCodeButton" type="button"><span>⧉</span> KODU KOPYALA</button>
+            <div class="room-panel-actions">
+              <button class="copy-button" id="copyCodeButton" type="button"><span>⧉</span> KODU KOPYALA</button>
+              <button class="share-button" id="shareRoomButton" type="button" aria-label="Oda kodunu WhatsApp veya bağlantı ile paylaş"><span class="material-symbols-rounded" aria-hidden="true">share</span> PAYLAŞ</button>
+            </div>
           </div>
           <div class="room-status-line">
             <span id="roomPlayerCount">0/2 oyuncu</span>
+            <span class="share-status" id="shareStatus" role="status" aria-live="polite"></span>
           </div>
         </div>
 
@@ -71,7 +75,7 @@
 
         <div class="lobby-page-actions match-footer-row">
           <a class="back-link" href="index.html">Ana Sayfaya Dön</a>
-          <span>Oda kodunu arkadaşınla paylaş.</span>
+          <span>Oda kodunu WhatsApp veya link ile paylaş.</span>
         </div>
       </section>
     </main>

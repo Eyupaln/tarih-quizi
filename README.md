@@ -88,6 +88,8 @@ Vuruş/kurtarış senkronizasyonu sunucuda yapılır: iki taraf da seçimini gö
 - Gerçek zamanlı 1v1 düello (iki cihaz / iki tarayıcı)
 - Oda kodu oluşturma / odaya katılma akışı
 - Canlı hazır durumları ve oyuncu slotları
+- Hazır olan oyuncu slotu yeşil ışık animasyonuyla settle olur
+- Oda kodunu WhatsApp veya doğrudan katılım linki ile paylaşma
 - Hazır durumlar tamamlanınca maçın otomatik başlaması
 - Hedef alanına dokunarak manuel vuruş/kurtarış seçimi
 - iki tarafın ayrı kilitlemesi ve `Oyuncu bekleniyor…` geri bildirimi
