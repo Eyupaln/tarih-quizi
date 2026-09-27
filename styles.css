@@ -427,7 +427,7 @@ body.is-loading {
   border-bottom: 4px solid var(--green);
   border-radius:4px 4px;
   box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35);
-  padding-top: 10px;
+  padding-top: 50px;
 }
 
 .hero-kicker {
@@ -3267,7 +3267,6 @@ body.is-loading {
 
 .lobby-hero {
   position: relative;
-  padding: 17px 0 23px 15px;
 }
 
 .lobby-hero::after {
